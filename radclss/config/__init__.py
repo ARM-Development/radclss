@@ -1,0 +1,2 @@
+from default_config import DEFAULT_DISCARD_VAR
+from output_config import OUTPUT_SITE, OUTPUT_FACILITY, OUTPUT_PLATFORM, OUTPUT_LEVEL
