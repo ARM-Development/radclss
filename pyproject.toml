@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radclss"
+version = "2026.1.30"
+description = "Extracted Radar Columns and In Situ Sensors"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "rjackson" }, {name = "jrobrien91"}]
+license = { text = "MIT" }
+dependencies = [
+    "arm_pyart",
+    "numpy",
+    "xarray",
+    "pandas",
+    "xradar",
+    "act-atmos",
+    "matplotlib",
+    "dask",
+]
+
+[project.urls]
+Homepage = "https://github.com/ARM-Development/radclss"
+Source = "github.com"
