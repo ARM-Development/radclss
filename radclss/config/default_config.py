@@ -165,6 +165,8 @@ DEFAULT_DISCARD_VAR = {'radar' : ['classification_mask',
                     ]
     }
 
+
+
 def set_discarded_variables(instrument, var_list):
     """
     Set the variables to be discarded from a given instrument datastream.

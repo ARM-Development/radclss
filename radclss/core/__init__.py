@@ -10,4 +10,4 @@ This package contains the core functions for RadCLss.
 
     radclss_core
 """
-from radclss_core import radclss # noqa: F401
+from .radclss_core import radclss # noqa: F401

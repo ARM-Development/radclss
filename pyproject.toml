@@ -11,10 +11,11 @@ requires-python = ">=3.9"
 authors = [{ name = "rjackson" }, {name = "jrobrien91"}]
 license = { text = "MIT" }
 dependencies = [
-    "arm-pyart",
+    "arm_pyart",
     "numpy",
     "xarray",
     "pandas",
+    "xradar",
     "act-atmos",
     "matplotlib",
     "dask",

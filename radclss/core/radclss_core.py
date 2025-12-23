@@ -2,13 +2,16 @@ import logging
 import time
 import xarray as xr
 import act
+import xradar as xd 
 
 from ..util.column_utils import subset_points, match_datasets_act
+from ..util.dod import adjust_radclss_dod
 from ..config.default_config import DEFAULT_DISCARD_VAR
-from ..config.output_config import OUTPUT_SITE, OUTPUT_FACILITY, OUTPUT_PLATFORM, OUTPUT_LEVEL
+from ..config.output_config import get_output_config
 from dask.distributed import Client, as_completed
 
-def radclss(volumes, serial=True, dod_file=None, discard_var={}, verbose=False):
+def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={}, verbose=False,
+            base_station="M1"):
     """
     Extracted Radar Columns and In-Situ Sensors
 
@@ -27,16 +30,26 @@ def radclss(volumes, serial=True, dod_file=None, discard_var={}, verbose=False):
     volumes : Dictionary
         Dictionary contianing files for each of the instruments, including
         all CMAC processed radar files per day. Each key is formatted as follows:
-            'instrument_site': 
+            'date': 'YYYYMMDD'
+            'instrument_site': file/list of files
+        where instrument is one of the supported instruments (radar, met, sonde,
+        pluvio, ld, vd, wxt) and site is the site name (e.g., M1, SGP, TWP, etc).
+    input_site_dict : Dictionary
+        Dictionary containing site information for each site being processed.
+        Each key is the site name (e.g., M1, SGP, TWP, etc) and the value is a 3-tuple
+        containing (latitude, longitude, altitude in meters).
     serial : Boolean, Default = False
         Option to denote serial processing; used to start dask cluster for
         subsetting columns in parallel.
-    dod_file : str, Default = None
-        Option to supply a Data Object Description file to verify standards
+    dod_version : str, Default = ''
+        Option to supply a Data Object Description version to verify standards.
+        If this is an empty string, then the latest version will be used.
     discard_var : Dictionary, Default = {}
         Dictionary containing variables to drop from each datastream.
     verbose : Boolean, Default = False
         Option to print additional information during processing.
+    base_station : str, Default = "M1"
+        The base station name to use for time variables.
 
     Returns
     -------
@@ -52,38 +65,61 @@ def radclss(volumes, serial=True, dod_file=None, discard_var={}, verbose=False):
     # Call Subset Points
     columns = []
     if serial == False:
-            current_client = Client.current()
-            if current_client is None:
-                raise RuntimeError("No Dask client found. Please start a Dask client before running in parallel mode.")
-            results = current_client.map(subset_points, volumes["radar"])
-            for done_work in as_completed(results, with_results=False):
-                try:
-                    columns.append(done_work.result())
-                except Exception as error:
-                    logging.log.exception(error)
+        current_client = Client.current()
+        if current_client is None:
+            raise RuntimeError("No Dask client found. Please start a Dask client before running in parallel mode.")
+        results = current_client.map(subset_points, volumes["radar"], input_site_dict=input_site_dict)
+        for done_work in as_completed(results, with_results=False):
+            try:
+                columns.append(done_work.result())
+            except Exception as error:
+                logging.log.exception(error)
     else:
         for rad in volumes['radar']:
-            columns.append(subset_points(rad))
+            if verbose:
+                print(f"Processing file: {rad}")
+            columns.append(subset_points(rad, input_site_dict=input_site_dict))
+            if verbose:
+                print("Processed file: ", rad)
+                print("Current number of successful columns: ", len(columns))
+                print("Last processed file results: ")
+                print(columns[-1])
 
     # Assemble individual columns into single DataSet
     try:
         # Concatenate all extracted columns across time dimension to form daily timeseries
-        ds = xr.concat([data for data in columns if data], dim="time")
-        ds['time'] = ds.sel(station="M1").base_time
-        ds['time_offset'] = ds.sel(station="M1").base_time
-        ds['base_time'] = ds.sel(station="M1").isel(time=0).base_time
-        ds['lat'] = ds.isel(time=0).lat
-        ds['lon'] = ds.isel(time=0).lon
-        ds['alt'] = ds.isel(time=0).alt
+        output_config = get_output_config()
+        output_platform = output_config['platform']
+        output_level = output_config['level']
+        ds_concat = xr.concat([data for data in columns if data], dim="time")
+        ds = act.io.create_ds_from_arm_dod(f'{output_platform}-{output_level}', 
+                                               {'time': ds_concat.sizes['time'], 
+                                                'height': ds_concat.sizes['height'], 
+                                                'station': ds_concat.sizes['station']},
+                                               version=dod_version)
+        
+        
+        ds['time'] = ds_concat.sel(station=base_station).base_time
+        ds['time_offset'] = ds_concat.sel(station=base_station).base_time
+        ds['base_time'] = ds_concat.sel(station=base_station).isel(time=0).base_time
+        ds['lat'] = ds_concat.isel(time=0).lat
+        ds['lon'] = ds_concat.isel(time=0).lon
+        ds['alt'] = ds_concat.isel(time=0).alt
+        for var in ds_concat.data_vars:
+            if var not in ['time', 'time_offset', 'base_time', 'lat', 'lon', 'alt']:
+                ds[var][:] = ds_concat[var][:]
+
         # Remove all the unused CMAC variables
         ds = ds.drop_vars(discard_var["radar"])
         # Drop duplicate latitude and longitude
-        ds = ds.drop_vars(['latitude', 'longitude'])
-    except ValueError:
+        ds = ds.drop_vars(['latitude', 'longitude']) 
+        del ds_concat       
+    except ValueError as e:
+        print(f"Error concatenating columns: {e}")
         ds = None
 
     # Free up Memory
-    del columns
+    del columns 
 
     # If successful column extraction, apply in-situ
     if ds:
@@ -105,7 +141,6 @@ def radclss(volumes, serial=True, dod_file=None, discard_var={}, verbose=False):
         
             # Radiosonde
             if instrument == "sonde":
-                
                 # Read in the file using ACT
                 grd_ds = act.io.read_arm_netcdf(volumes[k], 
                                                 cleanup_qc=True,
@@ -157,21 +192,6 @@ def radclss(volumes, serial=True, dod_file=None, discard_var={}, verbose=False):
                                         site.upper(), 
                                         discard=discard_var['wxt'],
                                         resample="mean")
-
-        # ----------------
-        # Check DOD - TBD
-        # ----------------
-        # verify the correct dimension order
-        ds = ds.transpose("time", "height", "station")
-        if dod_file:
-            try:
-                dod = xr.open_dataset(dod_file)
-                # verify the correct dimension order
-                ds = adjust_radclss_dod(ds, dod)
-            except ValueError as e:
-                print(f"Error: {e}")
-                print(f"Error type: {type(e).__name__}")
-                print("WARNING: Unable to Verify DOD")
         
     else:
         # There is no column extraction

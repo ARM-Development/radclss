@@ -1,3 +1,11 @@
+import numpy as np
+import xarray as xr
+import datetime
+import getpass
+import socket 
+
+from ..config import get_output_config
+
 def adjust_radclss_dod(radclss, dod):
     """
     Adjust the RadCLss DataSet to include missing datastreams
@@ -22,7 +30,6 @@ def adjust_radclss_dod(radclss, dod):
             # check to see if variable is within RadCLss
             # note: it may not be if file is missing.
             if var not in radclss.variables:
-                print(var)
                 new_size = []
                 for dim in dod[var].dims:
                     if dim == "time":
@@ -49,7 +56,7 @@ def adjust_radclss_dod(radclss, dod):
         del radclss["base_time"].attrs["units"]
 
     # reorder the DataArrays to match the ARM Data Object Identifier 
-    first = ["base_time", "time_offset", "time", "height", "station", "gate_time"]           # the two you want first
+    first = ["base_time", "time_offset", "time", "height", "station", "gate_time"]           
     last  = ["lat", "lon", "alt"]   # the three you want last
 
     # Keep only data variables, preserve order, and drop the ones already in first/last
@@ -58,16 +65,21 @@ def adjust_radclss_dod(radclss, dod):
     ordered = first + middle + last
     radclss = radclss[ordered]
 
-    # Update the global attributes
+    # Update the global attributes (some) to match the DOD
+
+    config = get_output_config()
+    OUTPUT_SITE = config['site']
+    OUTPUT_FACILITY = config['facility']
+    OUTPUT_PLATFORM = config['platform']
+    OUTPUT_LEVEL = config['level']
     radclss.drop_attrs()
     radclss.attrs = dod.attrs
     radclss.attrs['vap_name'] = ""
     radclss.attrs['command_line'] = "python bnf_radclss.py --serial True --array True"
-    radclss.attrs['dod_version'] = "csapr2radclss-c2-1.28"
-    radclss.attrs['site_id'] = "bnf"
-    radclss.attrs['platform_id'] = "csapr2radclss"
-    radclss.attrs['facility_id'] = "S3"
-    radclss.attrs['data_level'] = "c2"
+    radclss.attrs['site_id'] = OUTPUT_SITE
+    radclss.attrs['platform_id'] = OUTPUT_PLATFORM
+    radclss.attrs['facility_id'] = OUTPUT_FACILITY
+    radclss.attrs['data_level'] = OUTPUT_LEVEL
     radclss.attrs['location_description'] = "Southeast U.S. in Bankhead National Forest (BNF), Decatur, Alabama"
     radclss.attrs['datastream'] = "bnfcsapr2radclssS3.c2"
     radclss.attrs['input_datastreams'] = ["bnfcsapr2cmacS3.c1",
@@ -82,7 +94,9 @@ def adjust_radclss_dod(radclss, dod):
                                           "bnfvdisquantsM1.c1",
                                           "bnfmetwxtS13.b1"
     ]
-    radclss.attrs['history'] = ("created by user jrobrien on machine cumulus.ccs.ornl.gov at " + 
+    username = getpass.getuser()
+    hostname = socket.gethostname()
+    radclss.attrs['history'] = ("created by user " + username + " on machine " + hostname + " at " +
                                  str(datetime.datetime.now()) +
                                 " using Py-ART and ACT"
     )
