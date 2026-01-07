@@ -11,15 +11,14 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 def create_radclss_columns(radclss,
                            field="corrected_reflectivity",
                            p_vmin=-5,
-                           p_vmax=65,
-                           outdir="./"):
+                           p_vmax=65):
     """
     With the RadCLss product, generate a figure of all extracted columns
 
     Input
     -----
-    radclss : str
-        Filepath to the RadCLss file.
+    radclss : str or xarray dataset
+        Filepath to the RadCLss file or xarray dataset with the columns.
     field : str
         Specific CMAC field to display extracted column of
     vmin : int
@@ -28,14 +27,13 @@ def create_radclss_columns(radclss,
     vmax : int
         Maximum value to display between all subplots for the specific radar
         parameter
-    outdir : str
-        Path to desired output directory. If not supplied, assumes current 
-        working directory.
 
     Output
     ------
-    timeseries : png
-        Saved image of the RadCLss timeseris
+    fig: matplotlib figure
+        Figure containing the extracted columns.
+    axarr : matplotlib axes array
+        Array of matplotlib axes containing the extracted columns.  
     
     """
     # Create the figure
@@ -43,19 +41,25 @@ def create_radclss_columns(radclss,
     plt.subplots_adjust(hspace=0.8)
 
     # read the RadCLss file
-    try:
-        ds = xr.open_dataset(radclss[0], decode_timedelta=False)
-    except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        # 'e' will contain the error object
-        print("\nERROR - (create_radclss_timeseries):" +
-              f" \n\tOccured When Reading in RadCLss File: \n\t{e}")
-        print(f"\tError type: {type(e)}")
-        print(f"\tLine Number: ", exc_tb.tb_lineno)
-        print(f"\tFile Name: ", exc_tb.tb_frame.f_code.co_filename)
-        print("\n")
-        return
-    
+    if isinstance(radclss, str):
+        try:
+            ds = xr.open_dataset(radclss, decode_timedelta=False)
+        except Exception as e:
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            # 'e' will contain the error object
+            print("\nERROR - (create_radclss_timeseries):" +
+                f" \n\tOccured When Reading in RadCLss File: \n\t{e}")
+            print(f"\tError type: {type(e)}")
+            print(f"\tLine Number: ", exc_tb.tb_lineno)
+            print(f"\tFile Name: ", exc_tb.tb_frame.f_code.co_filename)
+            print("\n")
+            return
+    elif isinstance(radclss, xr.Dataset):
+        ds = radclss
+    else:
+        raise TypeError("\nERROR - (create_radclss_timeseries):" +
+              f" \n\tRadCLss Input is Not a String or xarray Dataset\n")
+
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(np.datetime_as_string(ds['time'].data[0], unit="s"), 
                                             "%Y-%m-%dT%H:%M:%S")
@@ -116,26 +120,7 @@ def create_radclss_columns(radclss,
                        cmap="ChaseSpectral"
     )
 
-    # save the figure
-    try:
-        fig.savefig(outdir + 
-                    'bnf-radclss-columns.' + 
-                    radclss[0].split('.')[-3]+
-                    '.png')
-        plt.close(fig)
-        STATUS = "COLUMNS SUCCESS"
-    except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        # 'e' will contain the error object
-        print("\nERROR - (create_radclss_timeseries):" +
-              f" \n\tOccured When Saving Figure to File: \n\t{e}")
-        print(f"\tError type: {type(e)}")
-        print(f"\tLine Number: ", exc_tb.tb_lineno)
-        print(f"\tFile Name: ", exc_tb.tb_frame.f_code.co_filename)
-        print("\n")
-        STATUS = "COLUMNS FAILED"
-
-    return STATUS
+    return fig, axarr
 
 def create_radclss_timeseries(radclss,
                               field="corrected_reflectivity", 

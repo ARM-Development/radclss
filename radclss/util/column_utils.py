@@ -2,7 +2,6 @@ import pyart
 import act  
 import numpy as np
 import xarray as xr
-import xradar as xd
 import datetime
 
 from ..config import DEFAULT_DISCARD_VAR 
@@ -51,15 +50,16 @@ def subset_points(nfile, input_site_dict, sonde=None, height_bins=np.arange(500,
     #try:
     # Read in the file
    
-    xradar_ds = xd.io.open_cfradial1_datatree(nfile)
-    for var in DEFAULT_DISCARD_VAR['radar']:
-        if var in xradar_ds.data_vars:
-            xradar_ds = xradar_ds.drop_vars(var)
-    if xradar_ds["/sweep_0"]["sweep_mode"] == "rhi":
-        xradar_ds.close()
-        return None 
-    radar = xradar_ds.pyart.to_radar()
-    xradar_ds.close()
+    #xradar_ds = xd.io.open_cfradial1_datatree(nfile)
+    #for var in DEFAULT_DISCARD_VAR['radar']:
+    #    if var in xradar_ds.data_vars:
+    #        xradar_ds = xradar_ds.drop_vars(var)
+    #if xradar_ds["/sweep_0"]["sweep_mode"] == "rhi":
+    #    xradar_ds.close()
+    #    return None 
+    #radar = xradar_ds.pyart.to_radar()
+    #xradar_ds.close()
+    radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR['radar'])
     # Check for single sweep scans
     if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
         radar.sweep_start_ray_index["data"] = np.ma.array([0])
@@ -160,7 +160,8 @@ def match_datasets_act(column,
                        discard, 
                        resample='sum', 
                        DataSet=False,
-                       prefix=None):
+                       prefix=None,
+                       verbose=False):
     """
     Time synchronization of a Ground Instrumentation Dataset to 
     a Radar Column for Specific Locations using the ARM ACT package
@@ -195,6 +196,9 @@ def match_datasets_act(column,
     prefix : str
         prefix for the desired spelling of variable names for the input
         datastream (to fix duplicate variable names between instruments)
+    
+    verbose : boolean
+        Boolean flag to set verbose output during processing. Default is False.
              
     Returns
     -------
@@ -255,6 +259,15 @@ def match_datasets_act(column,
         matched[var].attrs.update(source=matched.datastream)
         
     # Merge the two DataSets
-    column = xr.merge([column, matched])
-   
+    for k in matched.data_vars:
+        if k in column.data_vars:
+            column[k].sel(station=site)[:] = matched.sel(station=site)[k][:].astype(column[k].dtype)
+            if "_FillValue" in column[k].attrs:
+                if isinstance(column[k].attrs["_FillValue"], str):
+                    column[k].attrs["_FillValue"] = float(column[k].attrs["_FillValue"])
+                column[k] = column[k].fillna(column[k].attrs["_FillValue"]).astype(float)
+            if "missing_value" in column[k].attrs:
+                if isinstance(column[k].attrs["missing_value"], str):
+                    column[k].attrs["missing_value"] = float(column[k].attrs["missing_value"])
+                column[k] = column[k].fillna(column[k].attrs["missing_value"]).astype(float)
     return column
