@@ -6,7 +6,6 @@ This file contains default parameters and variables used throughout RadCLss.
 """
 # Define variables to drop from RadCLss from the respective datastreams 
 DEFAULT_DISCARD_VAR = {'radar' : ['classification_mask',
-                            'censor_mask',
                             'uncorrected_copol_correlation_coeff',
                             'uncorrected_differential_phase',
                             'uncorrected_differential_reflectivity',

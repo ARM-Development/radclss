@@ -3,9 +3,9 @@ import time
 import xarray as xr
 import act
 import xradar as xd 
+import numpy as np
 
 from ..util.column_utils import subset_points, match_datasets_act
-from ..util.dod import adjust_radclss_dod
 from ..config.default_config import DEFAULT_DISCARD_VAR
 from ..config.output_config import get_output_config
 from dask.distributed import Client, as_completed
@@ -68,7 +68,7 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
         current_client = Client.current()
         if current_client is None:
             raise RuntimeError("No Dask client found. Please start a Dask client before running in parallel mode.")
-        results = current_client.map(subset_points, volumes["radar"], input_site_dict=input_site_dict)
+        results = current_client.map(subset_points, volumes["radar"], sonde=volumes["sonde"], input_site_dict=input_site_dict)
         for done_work in as_completed(results, with_results=False):
             try:
                 columns.append(done_work.result())
@@ -78,7 +78,7 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
         for rad in volumes['radar']:
             if verbose:
                 print(f"Processing file: {rad}")
-            columns.append(subset_points(rad, input_site_dict=input_site_dict))
+            columns.append(subset_points(rad, sonde=volumes["sonde"], input_site_dict=input_site_dict))
             if verbose:
                 print("Processed file: ", rad)
                 print("Current number of successful columns: ", len(columns))
@@ -86,37 +86,70 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
                 print(columns[-1])
 
     # Assemble individual columns into single DataSet
-    try:
-        # Concatenate all extracted columns across time dimension to form daily timeseries
-        output_config = get_output_config()
-        output_platform = output_config['platform']
-        output_level = output_config['level']
-        ds_concat = xr.concat([data for data in columns if data], dim="time")
-        ds = act.io.create_ds_from_arm_dod(f'{output_platform}-{output_level}', 
-                                               {'time': ds_concat.sizes['time'], 
-                                                'height': ds_concat.sizes['height'], 
-                                                'station': ds_concat.sizes['station']},
-                                               version=dod_version)
-        
-        
-        ds['time'] = ds_concat.sel(station=base_station).base_time
-        ds['time_offset'] = ds_concat.sel(station=base_station).base_time
-        ds['base_time'] = ds_concat.sel(station=base_station).isel(time=0).base_time
-        ds['lat'] = ds_concat.isel(time=0).lat
-        ds['lon'] = ds_concat.isel(time=0).lon
-        ds['alt'] = ds_concat.isel(time=0).alt
-        for var in ds_concat.data_vars:
-            if var not in ['time', 'time_offset', 'base_time', 'lat', 'lon', 'alt']:
-                ds[var][:] = ds_concat[var][:]
+    #try:
+    # Concatenate all extracted columns across time dimension to form daily timeseries
+    output_config = get_output_config()
+    output_platform = output_config['platform']
+    output_level = output_config['level']
+    ds_concat = xr.concat([data for data in columns if data], dim="time")
+    if verbose:
+        print("Grabbing DOD for platform/level: ", f'{output_platform}.{output_level}')
+    ds = act.io.create_ds_from_arm_dod(f'{output_platform}.{output_level}', 
+                                            {'time': ds_concat.sizes['time'], 
+                                            'height': ds_concat.sizes['height'], 
+                                            'station': ds_concat.sizes['station']},
+                                            version=dod_version)
+    
+    
+    ds['time'] = ds_concat.sel(station=base_station).base_time
+    ds['time_offset'] = ds_concat.sel(station=base_station).base_time
+    ds['base_time'] = ds_concat.sel(station=base_station).isel(time=0).base_time
+    ds['station'] = ds_concat['station']
+    ds['height'] = ds_concat['height']
+    ds['lat'][:] = ds_concat.isel(time=0)["lat"][:]
+    ds['lon'][:] = ds_concat.isel(time=0)["lon"][:]
+    ds['alt'][:] = ds_concat.isel(time=0)["alt"][:]
 
-        # Remove all the unused CMAC variables
-        ds = ds.drop_vars(discard_var["radar"])
-        # Drop duplicate latitude and longitude
-        ds = ds.drop_vars(['latitude', 'longitude']) 
-        del ds_concat       
-    except ValueError as e:
-        print(f"Error concatenating columns: {e}")
-        ds = None
+    for var in ds_concat.data_vars:
+        if var not in ['time', 'time_offset', 'base_time', 'lat', 'lon', 'alt']:
+            if var in ds.data_vars:
+                if verbose:
+                    print(f"Adding variable to output dataset: {var}")
+                    print(f"Original dtype: {ds[var].dtype}, New dtype: {ds_concat[var].dtype}")
+                old_type = ds[var].dtype
+
+                # Assign data and convert to original dtype
+                ds[var][:] = ds_concat[var][:]
+                ds[var] = ds[var].astype(old_type)
+                if "_FillValue" in ds[var].attrs:
+                    if isinstance(ds[var].attrs["_FillValue"], str):
+                        if ds[var].dtype == 'float32':
+                            ds[var].attrs["_FillValue"] = np.float32(ds[var].attrs["_FillValue"])
+                        elif ds[var].dtype == 'float64':
+                            ds[var].attrs["_FillValue"] = np.float64(ds[var].attrs["_FillValue"])
+                        elif ds[var].dtype == 'int32':
+                            ds[var].attrs["_FillValue"] = np.int32(ds[var].attrs["_FillValue"])
+                        elif ds[var].dtype == 'int64':
+                            ds[var].attrs["_FillValue"] = np.int64(ds[var].attrs["_FillValue"])
+                    ds[var] = ds[var].fillna(ds[var].attrs["_FillValue"]).astype(float)
+                if "missing_value" in ds[var].attrs:
+                    if isinstance(ds[var].attrs["missing_value"], str):
+                        if ds[var].dtype == 'float32':
+                            ds[var].attrs["missing_value"] = np.float32(ds[var].attrs["missing_value"])
+                        elif ds[var].dtype == 'float64':
+                            ds[var].attrs["missing_value"] = np.float64(ds[var].attrs["missing_value"])
+                        elif ds[var].dtype == 'int32':
+                            ds[var].attrs["missing_value"] = np.int32(ds[var].attrs["missing_value"])
+                        elif ds[var].dtype == 'int64':
+                            ds[var].attrs["missing_value"] = np.int64(ds[var].attrs["missing_value"])
+                    ds[var] = ds[var].fillna(ds[var].attrs["missing_value"]).astype(float)
+
+    # Remove all the unused CMAC variables
+    # Drop duplicate latitude and longitude
+    del ds_concat       
+    #except ValueError as e:
+    #    print(f"Error concatenating columns: {e}")
+     #   ds = None
 
     # Free up Memory
     del columns 
@@ -130,14 +163,24 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
         # Find all of the met stations and match to columns
         vol_keys = list(volumes.keys())
         for k in vol_keys:
-            instrument, site = k.split("_", 1)
-
+            if len(volumes[k]) == 0:
+                if verbose:
+                    print(f"No files found for instrument/site: {k}")
+                continue
+            if "_" in k:
+                instrument, site = k.split("_", 1)
+            else:
+                instrument = k
+                site = base_station
             if instrument == "met":
+                if verbose:
+                    print(f"Matching MET data for site: {site}")
                 ds = match_datasets_act(ds, 
                                         volumes[k][0], 
                                         site.upper(), 
                                         resample="mean",
-                                        discard=discard_var['met'])
+                                        discard=discard_var['met'],
+                                        verbose=verbose)
         
             # Radiosonde
             if instrument == "sonde":
@@ -156,45 +199,51 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
                                         site.upper(),
                                         discard=discard_var[instrument],
                                         DataSet=True,
-                                        resample="mean")
+                                        resample="mean",
+                                        verbose=verbose)
                 # clean up
                 del grd_ds
 
             if instrument == "pluvio":
                 # Weighing Bucket Rain Gauge
                 ds = match_datasets_act(ds, 
-                                        volumes[k][0], 
+                                        volumes[k], 
                                         site.upper(), 
-                                        discard=discard_var["pluvio"])
+                                        discard=discard_var["pluvio"], 
+                                        verbose=verbose)
 
             if instrument == "ld":
                 ds = match_datasets_act(ds, 
-                                        volumes[k][0], 
+                                        volumes[k], 
                                         site.upper(), 
                                         discard=discard_var['ldquants'],
                                         resample="mean",
-                                        prefix="ldquants_")
-
+                                        prefix="ldquants_",
+                                        verbose=verbose)
         
             if instrument == "vd":
                 # Laser Disdrometer - Supplemental Site
                 ds = match_datasets_act(ds, 
-                                        volumes[k][0], 
+                                        volumes[k], 
                                         site.upper(), 
                                         discard=discard_var['vdisquants'],
                                         resample="mean",
-                                        prefix="vdisquants_")
+                                        prefix="vdisquants_",
+                                        verbose=verbose)
         
             if instrument == "wxt":
                 # Laser Disdrometer - Supplemental Site
                 ds = match_datasets_act(ds, 
-                                        volumes[k][0], 
+                                        volumes[k], 
                                         site.upper(), 
                                         discard=discard_var['wxt'],
-                                        resample="mean")
+                                        resample="mean",
+                                        verbose=verbose)
         
     else:
         # There is no column extraction
         raise RuntimeError(": RadCLss FAILURE (All Columns Failed to Extract): ")
-
+    del ds["base_time"].attrs["units"]
+    del ds["time_offset"].attrs["units"]
+    del ds["time"].attrs["units"]
     return ds
