@@ -11,7 +11,7 @@ from ..config.output_config import get_output_config
 from dask.distributed import Client, as_completed
 
 def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={}, verbose=False,
-            base_station="M1"):
+            base_station="M1", current_client=None):
     """
     Extracted Radar Columns and In-Situ Sensors
 
@@ -50,6 +50,9 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
         Option to print additional information during processing.
     base_station : str, Default = "M1"
         The base station name to use for time variables.
+    current_client : Dask Client, Default = None
+        Option to supply an existing Dask client for parallel processing.
+        Set to None to use the current active client.
 
     Returns
     -------
@@ -65,9 +68,11 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
     # Call Subset Points
     columns = []
     if serial == False:
-        current_client = Client.current()
         if current_client is None:
-            raise RuntimeError("No Dask client found. Please start a Dask client before running in parallel mode.")
+            try:
+                current_client = Client.current()
+            except ValueError:
+                raise RuntimeError("No Dask client found. Please start a Dask client before running in parallel mode.")
         results = current_client.map(subset_points, volumes["radar"], sonde=volumes["sonde"], input_site_dict=input_site_dict)
         for done_work in as_completed(results, with_results=False):
             try:
@@ -147,9 +152,7 @@ def radclss(volumes, input_site_dict, serial=True, dod_version='', discard_var={
     # Remove all the unused CMAC variables
     # Drop duplicate latitude and longitude
     del ds_concat       
-    #except ValueError as e:
-    #    print(f"Error concatenating columns: {e}")
-     #   ds = None
+    
 
     # Free up Memory
     del columns 
