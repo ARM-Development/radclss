@@ -1,0 +1,15 @@
+name: testenv
+channels:
+   - conda-forge
+   - defaults
+dependencies:
+   - arm_pyart
+   - pip
+   - xradar
+   - pytest
+   - pytest-mpl
+   - pytest-cov
+   - matplotlib
+   - dask
+   - distributed
+   - xarray
