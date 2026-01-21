@@ -1,3 +1,4 @@
-from .default_config import DEFAULT_DISCARD_VAR
+from .default_config import DEFAULT_DISCARD_VAR, set_discarded_variables
 from .output_config import set_output_site, set_output_facility, set_output_platform, set_output_level
 from .output_config import set_output_gate_time_attrs, set_output_time_offset_attrs, get_output_config
+from .output_config import set_output_alt_attrs, set_output_lat_attrs, set_output_lon_attrs, set_output_station_attrs

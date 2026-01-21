@@ -23,13 +23,7 @@ def write_radclss_output(ds, output_filename, process, version=None):
     with urllib.request.urlopen(base_url + process) as url:
         data = json.loads(url.read().decode())
     keys = list(data['versions'].keys())
-    #if version not in keys:
-    #    warnings.warn(
-    #        ' '.join(
-    #            ['Version:', version, 'not available or not specified. Using Version:', keys[-1]]
-    #        ),
-    #        UserWarning,
-    #    )
+    
     version = keys[-1]
     variables = data['versions'][version]['vars']
     encoding = {}
