@@ -5,6 +5,7 @@ channels:
 dependencies:
    - arm_pyart
    - pip
+   - act-atmos
    - xradar
    - pytest
    - pytest-mpl
