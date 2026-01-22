@@ -8,10 +8,14 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Runs at 2:00 AM UTC every day
 
+env:
+  ARM_USERNAME: ${{ secrets.ARM_USERNAME }}
+  ARM_PASSWORD: ${{ secrets.ARM_PASSWORD }}
+
 jobs:
    build:
      name: ${{ matrix.os }}-${{ matrix.python-version }}
-     if: github.repository == 'openradar/PyDDA'
+     if: github.repository == 'ARM-Development/radclss'
      runs-on: ${{ matrix.os }}-latest
      defaults:
         run:
@@ -33,9 +37,9 @@ jobs:
         uses: mamba-org/setup-micromamba@v2.0.6
         with:
            create-args: python=${{ matrix.python-version }}
-           environment-file: continuous_integration/environment-actions-${{ matrix.python-version }}.yml
+           environment-file: continuous-integration/environment-actions.yml
            micromamba-version: '2.0.0-0'
-           environment-name: pydda-env
+           environment-name: radclss_env
            cache-downloads: false
 
       - name: Install RadCLss
@@ -43,14 +47,11 @@ jobs:
         run: |
           python -m pip install -e . --no-deps --force-reinstall
 
-      - name: Lint with flake8
+      - name: Lint with ruff
         shell: bash -l {0}
         run: |
-           pip install flake8
-           # stop the build if there are Python syntax errors or undefined names
-           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          pip install ruff
+          ruff check .
 
       - name: Test with pytest
         shell: bash -l {0}

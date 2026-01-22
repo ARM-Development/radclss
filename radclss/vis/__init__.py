@@ -1,1 +1,1 @@
-from .quicklooks import create_radclss_columns
+from .quicklooks import create_radclss_columns  # noqa
