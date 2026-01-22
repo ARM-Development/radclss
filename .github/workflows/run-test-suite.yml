@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Runs at 2:00 AM UTC every day
 
+env:
+  ARM_USERNAME: ${{ secrets.ARM_USERNAME }}
+  ARM_PASSWORD: ${{ secrets.ARM_PASSWORD }}
+
 jobs:
    build:
      name: ${{ matrix.os }}-${{ matrix.python-version }}
