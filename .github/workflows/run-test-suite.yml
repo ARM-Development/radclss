@@ -33,9 +33,9 @@ jobs:
         uses: mamba-org/setup-micromamba@v2.0.6
         with:
            create-args: python=${{ matrix.python-version }}
-           environment-file: continuous_integration/environment-actions-${{ matrix.python-version }}.yml
+           environment-file: continuous_integration/environment-actions.yml
            micromamba-version: '2.0.0-0'
-           environment-name: pydda-env
+           environment-name: radclss_env
            cache-downloads: false
 
       - name: Install RadCLss
