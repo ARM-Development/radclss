@@ -10,7 +10,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def create_radclss_columns(
-    radclss, field="corrected_reflectivity", p_vmin=-5, p_vmax=65
+    radclss,
+    field="corrected_reflectivity",
+    p_vmin=-5,
+    p_vmax=65,
+    stations=None,
+    **kwargs,
 ):
     """
     With the RadCLss product, generate a figure of all extracted columns
@@ -27,6 +32,9 @@ def create_radclss_columns(
     vmax : int
         Maximum value to display between all subplots for the specific radar
         parameter
+    stations : list of str
+        List of station identifiers to plot. If None, defaults to
+        all of them.
 
     Output
     ------
@@ -36,9 +44,9 @@ def create_radclss_columns(
         Array of matplotlib axes containing the extracted columns.
 
     """
-    # Create the figure
-    fig, axarr = plt.subplots(3, 2, figsize=(14, 10))
-    plt.subplots_adjust(hspace=0.8)
+
+    if "cmap" not in kwargs:
+        kwargs["cmap"] = "ChaseSpectral"
 
     # read the RadCLss file
     if isinstance(radclss, str):
@@ -63,49 +71,31 @@ def create_radclss_columns(
             "\nERROR - (create_radclss_timeseries):"
             + " \n\tRadCLss Input is Not a String or xarray Dataset\n"
         )
+    # Create the figure
+    stations = ds["station"].data if stations is None else stations
+    nrows = int(np.ceil(len(stations) / 2))
+    ncols = 2
+    height = 5 * nrows
+    width = 14
+    fig, axarr = plt.subplots(nrows, ncols, figsize=(width, height))
+    plt.subplots_adjust(hspace=0.8)
 
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(
         np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
     )
     final_time = radar_time + timedelta(days=1)
-
-    ds[field].sel(station="M1").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[0, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S4").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[0, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S20").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[1, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S30").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[1, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S40").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[2, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S13").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[2, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
+    for i, station in enumerate(stations):
+        row = i // 2
+        col = i % 2
+        if len(axarr.shape) == 1:
+            axarr = np.expand_dims(axarr, axis=0)
+        ds[field].sel(station=station).sel(
+            time=slice(
+                radar_time.strftime("%Y-%m-%dT00:00:00"),
+                final_time.strftime("%Y-%m-%dT00:00:00"),
+            )
+        ).plot(y="height", ax=axarr[row, col], vmin=p_vmin, vmax=p_vmax, **kwargs)
 
     return fig, axarr
 
