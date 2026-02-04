@@ -10,7 +10,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def create_radclss_columns(
-    radclss, field="corrected_reflectivity", p_vmin=-5, p_vmax=65
+    radclss,
+    field="corrected_reflectivity",
+    vmin=-5,
+    vmax=65,
+    stations=None,
+    **kwargs,
 ):
     """
     With the RadCLss product, generate a figure of all extracted columns
@@ -27,6 +32,9 @@ def create_radclss_columns(
     vmax : int
         Maximum value to display between all subplots for the specific radar
         parameter
+    stations : list of str
+        List of station identifiers to plot. If None, defaults to
+        all of them.
 
     Output
     ------
@@ -36,10 +44,15 @@ def create_radclss_columns(
         Array of matplotlib axes containing the extracted columns.
 
     """
-    # Create the figure
-    fig, axarr = plt.subplots(3, 2, figsize=(14, 10))
-    plt.subplots_adjust(hspace=0.8)
 
+    if "cmap" not in kwargs:
+        kwargs["cmap"] = "ChaseSpectral"
+
+    if stations == []:
+        raise ValueError(
+            "\nERROR - (create_radclss_columns):"
+            + " \n\tStations list is empty. Please provide at least one station.\n"
+        )
     # read the RadCLss file
     if isinstance(radclss, str):
         try:
@@ -63,61 +76,49 @@ def create_radclss_columns(
             "\nERROR - (create_radclss_timeseries):"
             + " \n\tRadCLss Input is Not a String or xarray Dataset\n"
         )
+    # Create the figure
+    stations = ds["station"].data if stations is None else stations
+    nrows = int(np.ceil(len(stations) / 2))
+    ncols = 2
+    height = 5 * nrows
+    width = 14
+    fig, axarr = plt.subplots(nrows, ncols, figsize=(width, height))
+    plt.subplots_adjust(hspace=0.8)
 
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(
         np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
     )
     final_time = radar_time + timedelta(days=1)
-
-    ds[field].sel(station="M1").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[0, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S4").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[0, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S20").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[1, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S30").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[1, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S40").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[2, 0], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
-    ds[field].sel(station="S13").sel(
-        time=slice(
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        )
-    ).plot(y="height", ax=axarr[2, 1], vmin=p_vmin, vmax=p_vmax, cmap="ChaseSpectral")
+    for i, station in enumerate(stations):
+        row = i // 2
+        col = i % 2
+        if len(axarr.shape) == 1:
+            axarr = np.expand_dims(axarr, axis=0)
+        ds[field].sel(station=station).sel(
+            time=slice(
+                radar_time.strftime("%Y-%m-%dT00:00:00"),
+                final_time.strftime("%Y-%m-%dT00:00:00"),
+            )
+        ).plot(y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs)
 
     return fig, axarr
 
 
-def create_radclss_timeseries(
+def create_radclss_rainfall_timeseries(
     radclss,
     field="corrected_reflectivity",
     vmin=-5,
     vmax=65,
+    cmap="ChaseSpectral",
+    rr_min=0,
+    rr_max=250,
+    cum_min=0,
+    cum_max=500,
     dis_site="M1",
     rheight=750,
-    outdir="./",
+    title_flag=True,
+    figure_dpi=300,
 ):
     """
     With the RadCLss product, generate a timeseries of radar reflectivity
@@ -139,14 +140,25 @@ def create_radclss_timeseries(
     vmax : int
         Maximum value to display between all subplots for the specific radar
         parameter
+    cmap : str
+        Colormap to use for the radar field.
+    rr_min: float
+        Minimum value for the precipitation rate axis.
+    rr_max: float
+        Maximum value for the precipitation rate axis.
+    cum_min: float
+        Minimum value for the cumulative precipitation axis.
+    cum_max: float
+        Maximum value for the cumulative precipitation axis.
     dis_site : str
         Identifer of the supported location for lat/lon slices
     height : int
         Column height to compare against in-situ sensors for precipitation
         accumulation.
-    outdir : str
-        Path to desired output directory. If not supplied, assumes current
-        working directory.
+    title_flag : bool
+        Flag to add the title to the figure.
+    figure_dpi : int
+        DPI to set for the figure.
 
     Output
     ------
@@ -159,7 +171,10 @@ def create_radclss_timeseries(
 
     # read the RadCLss file
     try:
-        ds = xr.open_dataset(radclss[0], decode_timedelta=False)
+        if isinstance(radclss, str):
+            ds = xr.open_dataset(radclss, decode_timedelta=False)
+        elif isinstance(radclss, xr.Dataset):
+            ds = radclss
     except Exception as e:
         exc_type, exc_obj, exc_tb = sys.exc_info()
         # 'e' will contain the error object
@@ -186,7 +201,7 @@ def create_radclss_timeseries(
     ax2 = fig.add_subplot(311)
 
     ds[field].sel(station=dis_site).plot(
-        x="time", ax=ax2, cmap="ChaseSpectral", vmin=vmin, vmax=vmax
+        x="time", ax=ax2, cmap=cmap, vmin=vmin, vmax=vmax
     )
 
     ax2.set_title(
@@ -207,16 +222,12 @@ def create_radclss_timeseries(
     )
 
     # Pluvio2 Weighing Bucket Rain Gauge
-    if dis_site == "M1":
-        ds["intensity_rtnrt"].sel(station=dis_site).plot(
-            x="time", ax=ax3, label="PLUVIO2"
-        )
+    ds["intensity_rtnrt"].sel(station=dis_site).plot(x="time", ax=ax3, label="PLUVIO2")
 
     # LDQUANTS derived rain rate
-    if dis_site == "M1" or dis_site == "S30":
-        ds["ldquants_rain_rate"].sel(station=dis_site).plot(
-            x="time", ax=ax3, label="LDQUANTS"
-        )
+    ds["ldquants_rain_rate"].sel(station=dis_site).plot(
+        x="time", ax=ax3, label="LDQUANTS"
+    )
 
     ax3.set_title(" ")
     ax3.set_ylabel("Precipitation Rate \n[mm/hr]")
@@ -229,6 +240,7 @@ def create_radclss_timeseries(
     )
     ax3.legend(loc="upper right")
     ax3.grid(True)
+    ax3.set_ylim(rr_min, rr_max)
     # Add a blank space next to the subplot to shape it as the above plot
     divider = make_axes_locatable(ax3)
     cax = divider.append_axes("right", size="3%", pad=1.9)
@@ -241,7 +253,7 @@ def create_radclss_timeseries(
 
     # CMAC Accumulated Rain Rates
     radar_accum = act.utils.accumulate_precip(
-        ds.sel(station=dis_site).sel(height=rheight), "rain_rate_A"
+        ds.sel(station=dis_site).sel(height=rheight, method="nearest"), "rain_rate_A"
     ).compute()
     # CMAC Accumulated Rain Rates
     radar_accum["rain_rate_A_accumulated"].plot(x="time", ax=ax4, label="CMAC")
@@ -265,58 +277,37 @@ def create_radclss_timeseries(
     ax4.set_xlabel("Time [UTC]")
     ax4.legend(loc="upper left")
     ax4.grid(True)
-    ax4.set_ylim(0, radar_accum["rain_rate_A_accumulated"].max() + 20)
     ax4.set_xlim(
         [
             radar_time.strftime("%Y-%m-%dT00:00:00"),
             final_time.strftime("%Y-%m-%dT00:00:00"),
         ]
     )
+    ax4.set_ylim(cum_min, cum_max)
     # Add a blank space next to the subplot to shape it as the above plot
     divider = make_axes_locatable(ax4)
     cax = divider.append_axes("right", size="3%", pad=1.9)
     cax.set_visible(False)
 
     # Set the DPI to a higher value (e.g., 300)
-    plt.rcParams["figure.dpi"] = 300
-    plt.rcParams["savefig.dpi"] = 300
+    plt.rcParams["figure.dpi"] = figure_dpi
+    plt.rcParams["savefig.dpi"] = figure_dpi
 
     # Add the title
-    ##plt.suptitle("BNF Extracted Radar Columns and In-Situ Sensors (RadCLss) \n" +
-    ##             radar_time.strftime("%Y-%m-%d"))
-
-    # save the figure
-    try:
-        fig.savefig(
-            outdir
-            + "bnf-radclss-timeseries."
-            + dis_site
-            + "."
-            + radclss[0].split(".")[-3]
-            + ".png"
+    if title_flag is True:
+        plt.suptitle(
+            "BNF Extracted Radar Columns and In-Situ Sensors (RadCLss) \n"
+            + radar_time.strftime("%Y-%m-%d")
         )
-        plt.close(fig)
-        STATUS = "TIMESERIES SUCCESS"
-    except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        # 'e' will contain the error object
-        print(
-            "\nERROR - (create_radclss_timeseries):"
-            + f" \n\tOccured When Saving Figure to File: \n\t{e}"
-        )
-        print(f"\tError type: {type(e)}")
-        print("\tLine Number: ", exc_tb.tb_lineno)
-        print("\tFile Name: ", exc_tb.tb_frame.f_code.co_filename)
-        print("\n")
-        STATUS = "TIMESERIES FAILED"
 
     # Clean up this function
-    del ax2, ax3, ax4
+    ax = np.array([ax2, ax3, ax4])
     del radar_accum
     if dis_site == "M1" or dis_site == "S30":
         del ld_precip_accum
     if dis_site == "M1":
         del gauge_precip_accum
-    del ds
+    if isinstance(radclss, str):
+        ds.close()
 
-    return STATUS
+    return fig, ax
