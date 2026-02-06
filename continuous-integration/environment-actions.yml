@@ -13,4 +13,4 @@ dependencies:
    - matplotlib
    - dask
    - distributed
-   - xarray
+   - xarray>=2015.12.0
