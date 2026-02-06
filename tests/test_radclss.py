@@ -463,6 +463,11 @@ def test_match_datasets_act():
     radclss_file = arm_test_data.DATASETS.fetch(
         "bnfcsapr2radclss.c2.20250619.000000.nc"
     )
+    for files in arm_test_data.DATASETS.registry.keys():
+        if "bnf" in files:
+            if not os.path.exists(os.path.join(test_data_path, files)):
+                arm_test_data.DATASETS.fetch(files)
+
     met_M1_files = glob.glob(os.path.join(test_data_path, "*bnfmetM1.b1*"))
     radclss_ds = xr.open_dataset(radclss_file)
     radclss_ds = radclss_ds.drop_vars(
@@ -490,7 +495,6 @@ def test_match_datasets_act():
         discard=radclss.config.DEFAULT_DISCARD_VAR["met"],
     )
 
-    print(matched_ds_mean)
     assert not np.array_equal(
         matched_ds_mean["rh_mean"].values, matched_ds_skip["rh_mean"].values
     )
