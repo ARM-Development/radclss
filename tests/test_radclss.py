@@ -393,3 +393,69 @@ def test_radclss_parallel():
         assert not (
             my_columns["ldquants_med_diameter"].sel(station=site) == missing_value
         ).all()
+
+
+def test_subset_points_no_sonde():
+    test_data_path = arm_test_data.DATASETS.abspath
+    radclss_file = os.path.join(
+        test_data_path, "bnfcsapr2radclss.c2.20250619.000000.nc"
+    )
+    ds = xr.open_dataset(radclss_file)
+    input_site_dict = {
+        "M1": (34.34525, -87.33842, 293),
+        "S4": (34.46451, -87.23598, 197),
+        "S20": (34.65401, -87.29264, 178),
+        "S30": (34.38501, -86.92757, 183),
+        "S40": (34.17932, -87.45349, 236),
+        "S13": (34.343889, -87.350556, 286),
+    }
+    subset_ds = radclss.util.subset_points(ds, input_site_dict, sonde=False)
+    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert set(subset_ds.data_vars) == {"corrected_reflectivity"}
+    assert subset_ds.dims["station"] == 2
+    assert subset_ds.dims["time"] == ds.dims["time"]
+    assert subset_ds.dims["height"] == ds.dims["height"]
+    assert subset_ds["corrected_reflectivity"].attrs.get("missing_value", None) == -9999
+    assert "sonde_u_wind" not in subset_ds.data_vars
+    assert "sonde_v_wind" not in subset_ds.data_vars
+    assert "sonde_tdry" not in subset_ds.data_vars
+    assert "sonde_rh" not in subset_ds.data_vars
+
+
+def test_subset_points_with_sonde():
+    test_data_path = arm_test_data.DATASETS.abspath
+    radclss_file = os.path.join(
+        test_data_path, "bnfcsapr2radclss.c2.20250619.000000.nc"
+    )
+    sonde_files = sorted(
+        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+    )
+    ds = xr.open_dataset(radclss_file)
+    input_site_dict = {
+        "M1": (34.34525, -87.33842, 293),
+        "S4": (34.46451, -87.23598, 197),
+        "S20": (34.65401, -87.29264, 178),
+        "S30": (34.38501, -86.92757, 183),
+        "S40": (34.17932, -87.45349, 236),
+        "S13": (34.343889, -87.350556, 286),
+    }
+    subset_ds = radclss.util.subset_points(ds, input_site_dict, sonde=sonde_files)
+    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert set(subset_ds.data_vars) == {
+        "corrected_reflectivity",
+        "sonde_u_wind",
+        "sonde_v_wind",
+        "sonde_tdry",
+        "sonde_rh",
+    }
+    assert subset_ds.dims["station"] == 2
+    assert subset_ds.dims["time"] == ds.dims["time"]
+    assert subset_ds.dims["height"] == ds.dims["height"]
+    assert subset_ds["corrected_reflectivity"].attrs.get("missing_value", None) == -9999
+    assert "sonde_u_wind" in subset_ds.data_vars
+    assert "sonde_v_wind" in subset_ds.data_vars
+    assert "sonde_tdry" in subset_ds.data_vars
+    assert "sonde_rh" in subset_ds.data_vars
+
+
+# def test_match_datasets_act():
