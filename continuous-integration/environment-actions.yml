@@ -1,7 +1,6 @@
 name: testenv
 channels:
    - conda-forge
-   - defaults
 dependencies:
    - arm_pyart
    - pip
@@ -13,4 +12,4 @@ dependencies:
    - matplotlib
    - dask
    - distributed
-   - xarray
+   - xarray==2025.6.1

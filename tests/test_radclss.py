@@ -393,3 +393,118 @@ def test_radclss_parallel():
         assert not (
             my_columns["ldquants_med_diameter"].sel(station=site) == missing_value
         ).all()
+
+
+def test_subset_points():
+    test_data_path = arm_test_data.DATASETS.abspath
+    # Before testing, ensure that ARM credentials are set in environment variables
+    username = os.getenv("ARM_USERNAME")
+    token = os.getenv("ARM_PASSWORD")
+    if not username or not token:
+        return  # Skip test if credentials are not set
+
+    act.discovery.download_arm_data(
+        username,
+        token,
+        "bnfcsapr2cmacS3.c1",
+        "2025-06-19T12:00:00",
+        "2025-06-19T12:30:00",
+        output=test_data_path,
+    )
+
+    act.discovery.download_arm_data(
+        username,
+        token,
+        "bnfsondewnpnM1.b1",
+        "2025-06-18T00:00:00",
+        "2025-06-20T00:00:00",
+        output=test_data_path,
+    )
+
+    rad_path = os.path.join(test_data_path, "*bnfcsapr2cmacS3.c1*.nc")
+    radar_files = sorted(glob.glob(rad_path))
+    input_site_dict = {
+        "M1": (34.34525, -87.33842, 293),
+        "S30": (34.38501, -86.92757, 183),
+    }
+    subset_ds = radclss.util.subset_points(radar_files[0], input_site_dict, sonde=None)
+    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert "corrected_reflectivity" in subset_ds.data_vars
+    assert subset_ds.dims["station"] == 2
+    assert np.array_equal(subset_ds["height"].values, np.arange(500, 8500, 250))
+    assert "sonde_u_wind" not in subset_ds.data_vars
+    assert "sonde_v_wind" not in subset_ds.data_vars
+    assert "sonde_tdry" not in subset_ds.data_vars
+    assert "sonde_rh" not in subset_ds.data_vars
+
+    # Test with rawinsonde input instead of sonde=False
+    sonde_files = sorted(
+        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+    )
+
+    subset_ds = radclss.util.subset_points(
+        radar_files[0], input_site_dict, sonde=sonde_files
+    )
+    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert np.array_equal(subset_ds["height"].values, np.arange(500, 8500, 250))
+    assert "corrected_reflectivity" in subset_ds.data_vars
+    assert "sonde_u_wind" in subset_ds.data_vars
+    assert "sonde_v_wind" in subset_ds.data_vars
+    assert "sonde_tdry" in subset_ds.data_vars
+    assert "sonde_rh" in subset_ds.data_vars
+    assert "sonde_u_wind" in subset_ds.data_vars
+    assert "sonde_v_wind" in subset_ds.data_vars
+    assert "sonde_tdry" in subset_ds.data_vars
+    assert "sonde_rh" in subset_ds.data_vars
+
+
+def test_match_datasets_act():
+    test_data_path = arm_test_data.DATASETS.abspath
+    radclss_file = arm_test_data.DATASETS.fetch(
+        "bnfcsapr2radclss.c2.20250619.000000.nc"
+    )
+    for files in arm_test_data.DATASETS.registry.keys():
+        if "bnf" in files:
+            if not os.path.exists(os.path.join(test_data_path, files)):
+                arm_test_data.DATASETS.fetch(files)
+
+    met_M1_files = glob.glob(os.path.join(test_data_path, "*bnfmetM1.b1*"))
+    print(met_M1_files)
+    radclss_ds = xr.open_dataset(radclss_file)
+    radclss_ds = radclss_ds.drop_vars(
+        [var for var in radclss_ds.data_vars if "temp" in var]
+    )  # Remove temp variables for testing
+    matched_ds_mean = radclss.util.match_datasets_act(
+        radclss_ds,
+        met_M1_files,
+        "M1",
+        resample="mean",
+        discard=radclss.config.DEFAULT_DISCARD_VAR["met"],
+    )
+    matched_ds_skip = radclss.util.match_datasets_act(
+        radclss_ds,
+        met_M1_files,
+        "M1",
+        resample="skip",
+        discard=radclss.config.DEFAULT_DISCARD_VAR["met"],
+    )
+    matched_ds_sum = radclss.util.match_datasets_act(
+        radclss_ds,
+        met_M1_files,
+        "M1",
+        resample="sum",
+        discard=radclss.config.DEFAULT_DISCARD_VAR["met"],
+    )
+
+    assert not np.array_equal(
+        matched_ds_mean["rh_mean"].values, matched_ds_skip["rh_mean"].values
+    )
+    assert not np.array_equal(
+        matched_ds_mean["rh_mean"].values, matched_ds_sum["rh_mean"].values
+    )
+    assert not np.array_equal(
+        matched_ds_skip["rh_mean"].values, matched_ds_sum["rh_mean"].values
+    )
+    assert matched_ds_mean.dims["time"] == radclss_ds.dims["time"]
+    assert matched_ds_skip.dims["time"] == radclss_ds.dims["time"]
+    assert matched_ds_sum.dims["time"] == radclss_ds.dims["time"]
