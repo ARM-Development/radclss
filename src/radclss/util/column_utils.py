@@ -172,6 +172,7 @@ def match_datasets_act(
     site,
     discard,
     resample="sum",
+    resample_time="5Min",
     DataSet=False,
     prefix=None,
     verbose=False,
@@ -200,8 +201,14 @@ def match_datasets_act(
 
     resample : str
         Mathematical operational for resampling ground instrumentation to the radar time.
-        Default is to sum the data across the resampling period. Checks for 'mean' or
-        to 'skip' altogether.
+        'sum' will sum the ground data within the resample_time window,
+        'mean' will average the ground data within the resample_time window,
+        and 'skip' will not resample the data and will only interpolate to the radar time.
+        Default is 'sum'.
+
+    resample_time : str
+        Time resolution for resampling ground instrumentation data before mapping to radar time.
+        Default is "5Min".
 
     DataSet : boolean
         Boolean flag to determine if ground input is an Xarray Dataset.
@@ -241,24 +248,28 @@ def match_datasets_act(
     if "height" in grd_ds.dims:
         grd_ds = grd_ds.interp(height=np.arange(3150, 10050, 50), method="linear")
 
-    # Resample the ground data to 5 min and interpolate to the CSU X-Band time.
+    # Resample the ground data to 5 min and interpolate to the radar time.
     # Keep data variable attributes to help distingish between instruments/locations
-    if resample.split("=")[-1] == "mean":
+    if resample == "mean":
         matched = (
-            grd_ds.resample(time="5Min", closed="right")
+            grd_ds.resample(time=resample_time, closed="right")
             .mean(keep_attrs=True)
             .interp(time=column.time, method="linear")
         )
-    elif resample.split("=")[-1] == "skip":
+    elif resample == "skip":
         matched = grd_ds.interp(time=column.time, method="linear")
-    else:
+    elif resample == "sum":
         matched = (
-            grd_ds.resample(time="5Min", closed="right")
+            grd_ds.resample(time=resample_time, closed="right")
             .sum(keep_attrs=True)
             .interp(time=column.time, method="linear")
         )
+    else:
+        raise ValueError(
+            "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
+        )
 
-    # Add SAIL site location as a dimension for the Pluvio data
+    # Add site location as a dimension for the Pluvio data
     matched = matched.assign_coords(coords=dict(station=site))
     matched = matched.expand_dims("station")
 

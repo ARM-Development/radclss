@@ -1,10 +1,11 @@
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
+package-dir = {"" = "src"}
 
 [project]
 name = "radclss"
-version = "2026.1.30"
+version = "2026.2.6"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
 requires-python = ">=3.9"
