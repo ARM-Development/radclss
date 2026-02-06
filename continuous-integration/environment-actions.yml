@@ -12,4 +12,4 @@ dependencies:
    - matplotlib
    - dask
    - distributed
-   - xarray
+   - xarray==2025.6.1
