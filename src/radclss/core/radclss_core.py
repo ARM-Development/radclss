@@ -38,8 +38,8 @@ def radclss(
     volumes : Dictionary
         Dictionary contianing files for each of the instruments, including
         all CMAC processed radar files per day. Each key is formatted as follows:
-            'date': 'YYYYMMDD'
-            'instrument_site': file/list of files
+        'date': 'YYYYMMDD'
+        'instrument_site': file/list of files
         where instrument is one of the supported instruments (radar, met, sonde,
         pluvio, ld, vd, wxt) and site is the site name (e.g., M1, SGP, TWP, etc).
     input_site_dict : Dictionary

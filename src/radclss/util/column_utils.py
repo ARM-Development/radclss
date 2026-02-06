@@ -22,9 +22,9 @@ def subset_points(
     input_site_dict : dict
         Dictionary containing the site names as keys and their
         lat/lon coordinates as values in a list format:
-            {'site1': [lat1, lon1, alt1],
-             'site2': [lat2, lon2, alt2],
-             ...}
+        {'site1': [lat1, lon1, alt1],
+        'site2': [lat2, lon2, alt2],
+        ...}
     sonde : list, optional
         List of radiosonde file paths to be merged into the radar
         prior to column extraction. The nearest sonde file to the
