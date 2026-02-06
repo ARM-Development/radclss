@@ -469,6 +469,7 @@ def test_match_datasets_act():
                 arm_test_data.DATASETS.fetch(files)
 
     met_M1_files = glob.glob(os.path.join(test_data_path, "*bnfmetM1.b1*"))
+    print(met_M1_files)
     radclss_ds = xr.open_dataset(radclss_file)
     radclss_ds = radclss_ds.drop_vars(
         [var for var in radclss_ds.data_vars if "temp" in var]

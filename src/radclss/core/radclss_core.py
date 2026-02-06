@@ -236,6 +236,7 @@ def radclss(
                     ds,
                     volumes[k],
                     site.upper(),
+                    resample="sum",
                     discard=discard_var["pluvio"],
                     verbose=verbose,
                 )
