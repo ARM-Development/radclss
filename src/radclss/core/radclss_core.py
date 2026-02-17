@@ -4,7 +4,7 @@ import xarray as xr
 import act
 import numpy as np
 
-from ..util.column_utils import subset_points, match_datasets_act
+from ..util.column_utils import subset_points, match_datasets_act, get_nexrad_column
 from ..config.default_config import DEFAULT_DISCARD_VAR
 from ..config.output_config import get_output_config
 from dask.distributed import Client, as_completed
@@ -19,6 +19,9 @@ def radclss(
     verbose=False,
     base_station="M1",
     current_client=None,
+    nexrad=True,
+    nexrad_site=None,
+    height_bins=np.arange(500, 8500, 250),
 ):
     """
     Extracted Radar Columns and In-Situ Sensors
@@ -32,6 +35,8 @@ def radclss(
         - Laser Disdrometer (mutliple sites) (ld/vdisquants)
         - Radiosonde (sondewnpn)
         - Ceilometer (ceil)
+        - NEXRAD radar
+
 
     Parameters
     ----------
@@ -61,6 +66,13 @@ def radclss(
     current_client : Dask Client, Default = None
         Option to supply an existing Dask client for parallel processing.
         Set to None to use the current active client.
+    nexrad: bool
+        Set to True to pull from the nearest NEXRAD from the ARM site.
+    nexrad_site: str or None
+        If the nexrad flag is True, then use this NEXRAD radar to get the data.
+        Set to None to use the default settings in RadCLss.
+    height_bins: numpy array
+        The height bins in meters to provide the column over.
 
     Returns
     -------
@@ -88,6 +100,7 @@ def radclss(
             volumes["radar"],
             sonde=volumes["sonde"],
             input_site_dict=input_site_dict,
+            height_bins=height_bins,
         )
         for done_work in as_completed(results, with_results=False):
             try:
@@ -100,7 +113,10 @@ def radclss(
                 print(f"Processing file: {rad}")
             columns.append(
                 subset_points(
-                    rad, sonde=volumes["sonde"], input_site_dict=input_site_dict
+                    rad,
+                    sonde=volumes["sonde"],
+                    input_site_dict=input_site_dict,
+                    height_bins=height_bins,
                 )
             )
             if verbose:
@@ -112,10 +128,45 @@ def radclss(
     # Assemble individual columns into single DataSet
     # try:
     # Concatenate all extracted columns across time dimension to form daily timeseries
+
     output_config = get_output_config()
+    nexrad_columns = []
+    if nexrad:
+        time_list = [x["time"].dt.strftime("%Y-%m-%DT%H:%M:%S") for x in columns]
+        if not serial:
+            if current_client is None:
+                try:
+                    current_client = Client.current()
+                except ValueError:
+                    raise RuntimeError(
+                        "No Dask client found. Please start a Dask client before running in parallel mode."
+                    )
+            results = current_client.map(
+                get_nexrad_column,
+                output_config["site"],
+                time_list,
+                nexrad_radar=nexrad_site,
+            )
+
+            for done_work in as_completed(results, with_results=False):
+                try:
+                    nexrad_columns.append(done_work.result())
+                except Exception as error:
+                    logging.log.exception(error)
+        else:
+            for time_str in time_list:
+                nexrad_columns.append(
+                    get_nexrad_column(
+                        output_config["site"],
+                        input_site_dict,
+                        time_str,
+                    )
+                )
+
     output_platform = output_config["platform"]
     output_level = output_config["level"]
     ds_concat = xr.concat([data for data in columns if data], dim="time")
+    ds_concat = xr.concat([ds_concat, nexrad_columns], dim="time")
     if verbose:
         print("Grabbing DOD for platform/level: ", f"{output_platform}.{output_level}")
     ds = act.io.create_ds_from_arm_dod(

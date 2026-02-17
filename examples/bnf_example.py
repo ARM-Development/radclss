@@ -47,6 +47,8 @@ def main():
         my_columns = radclss.core.radclss(
             volumes, input_site_dict, serial=False, verbose=True
         )
+    nexrad_columns = radclss.util.get_nexrad_column("BNF", input_site_dict)
+    nexrad_columns.to_netcdf("nexrad_columns")
     radclss.io.write_radclss_output(
         my_columns, "radclss_example.nc", "csapr2radclss.c2"
     )
