@@ -3,6 +3,7 @@ import time
 import xarray as xr
 import act
 import numpy as np
+import itertools
 
 from ..util.column_utils import subset_points, match_datasets_act, get_nexrad_column
 from ..config.default_config import DEFAULT_DISCARD_VAR
@@ -144,8 +145,8 @@ def radclss(
             results = current_client.map(
                 get_nexrad_column,
                 time_list,
-                output_config["site"],
-                input_site_dict,
+                itertools.repeat(output_config["site"]),
+                itertools.repeat(input_site_dict),
                 nexrad_radar=nexrad_site,
             )
 
