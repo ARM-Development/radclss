@@ -143,8 +143,9 @@ def radclss(
                     )
             results = current_client.map(
                 get_nexrad_column,
-                output_config["site"],
                 time_list,
+                output_config["site"],
+                input_site_dict,
                 nexrad_radar=nexrad_site,
             )
 
@@ -157,9 +158,9 @@ def radclss(
             for time_str in time_list:
                 nexrad_columns.append(
                     get_nexrad_column(
+                        time_str,
                         output_config["site"],
                         input_site_dict,
-                        time_str,
                     )
                 )
 

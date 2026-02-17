@@ -14,9 +14,9 @@ from ..config import get_output_config
 
 
 def get_nexrad_column(
+    rad_time,
     site,
     input_site_dict,
-    rad_time,
     height_bins=np.arange(500, 8500, 250),
     nexrad_radar=None,
 ):
@@ -26,6 +26,8 @@ def get_nexrad_column(
 
     Parameters
     ----------
+    rad_time: str
+        The radar time in format "%Y-%m-%dT%H:%M:%S"
     site: str
         The ARM site code (i.e. BNF, SGP) to use.
     input_site_dict : dict
@@ -34,8 +36,6 @@ def get_nexrad_column(
         {'site1': [lat1, lon1, alt1],
         'site2': [lat2, lon2, alt2],
         ...}
-    rad_time: str
-        The radar time in format "%Y-%m-%dT%H:%M:%S"
     height_bins: numpy array
         The height bins in meters to provide the column over.
     nexrad_radar: str or None
@@ -116,6 +116,7 @@ def get_nexrad_column(
         # Time is based off the start of the radar volume
         da["gate_time"] = da.base_time.values + da.isel(height=0).time_offset.values
         column_list.append(da)
+
     # Concatenate the extracted radar columns for this scan across all sites
     ds = xr.concat([data for data in column_list if data], dim="station")
     return ds

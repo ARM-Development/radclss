@@ -75,9 +75,9 @@ def test_get_nexrad_column():
 
                 # Call the function
                 result = get_nexrad_column(
+                    rad_time=rad_time,
                     site=site,
                     input_site_dict=input_site_dict,
-                    rad_time=rad_time,
                     height_bins=height_bins,
                     nexrad_radar=nexrad_radar,
                 )
@@ -142,9 +142,9 @@ def test_get_nexrad_column_integration():
 
     # This would actually download from S3
     result = get_nexrad_column(
+        rad_time=rad_time,
         site=site,
         input_site_dict=input_site_dict,
-        rad_time=rad_time,
         height_bins=height_bins,
     )
 
