@@ -3,7 +3,6 @@ import time
 import xarray as xr
 import act
 import numpy as np
-import itertools
 
 from ..util.column_utils import subset_points, match_datasets_act, get_nexrad_column
 from ..config.default_config import DEFAULT_DISCARD_VAR
@@ -133,7 +132,7 @@ def radclss(
     output_config = get_output_config()
     nexrad_columns = []
     if nexrad:
-        time_list = [x["time"].dt.strftime("%Y-%m-%DT%H:%M:%S") for x in columns]
+        time_list = [str(x["base_time"].dt.strftime("%Y-%m-%dT%H:%M:%S").values[0]) for x in columns]
         if not serial:
             if current_client is None:
                 try:
@@ -142,13 +141,11 @@ def radclss(
                     raise RuntimeError(
                         "No Dask client found. Please start a Dask client before running in parallel mode."
                     )
+            nexy = lambda x: get_nexrad_column(x, output_config["site"], input_site_dict, 
+                    nexrad_radar=nexrad_site)
             results = current_client.map(
-                get_nexrad_column,
-                time_list,
-                itertools.repeat(output_config["site"]),
-                itertools.repeat(input_site_dict),
-                nexrad_radar=nexrad_site,
-            )
+                nexy,
+                time_list)
 
             for done_work in as_completed(results, with_results=False):
                 try:
@@ -168,7 +165,8 @@ def radclss(
     output_platform = output_config["platform"]
     output_level = output_config["level"]
     ds_concat = xr.concat([data for data in columns if data], dim="time")
-    ds_concat = xr.concat([ds_concat, nexrad_columns], dim="time")
+    nexrad_columns = xr.concat([data for data in nexrad_columns if data], dim="time") 
+    ds_concat = xr.merge([ds_concat, nexrad_columns])
     if verbose:
         print("Grabbing DOD for platform/level: ", f"{output_platform}.{output_level}")
     ds = act.io.create_ds_from_arm_dod(
