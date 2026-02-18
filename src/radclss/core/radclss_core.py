@@ -459,7 +459,7 @@ def radclss(
 
     if verbose:
         print(f"  Merging {len(ds_concat)} radar datasets...")
-    ds_concat = xr.merge([x for x in ds_concat.values])
+    ds_concat = xr.merge([x for x in ds_concat.values()])
     if nexrad_columns is not None:
         if verbose:
             print("  Merging NEXRAD data into combined dataset...")
