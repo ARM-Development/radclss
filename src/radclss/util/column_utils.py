@@ -4,6 +4,7 @@ import act
 import numpy as np
 import xarray as xr
 import datetime
+import logging
 
 from datetime import timedelta
 from botocore.config import Config
@@ -59,7 +60,8 @@ def get_nexrad_column(
 
     lats = list([x[0] for x in input_site_dict.values()])
     lons = list([x[1] for x in input_site_dict.values()])
-
+    site_alt = list([x[2] for x in input_site_dict.values()])
+    sites = list(input_site_dict.keys())
     right_now = datetime.datetime.strptime(rad_time, "%Y-%m-%dT%H:%M:%S")
     yesterday = right_now - timedelta(days=1)
     year = right_now.year
@@ -119,6 +121,9 @@ def get_nexrad_column(
 
     # Concatenate the extracted radar columns for this scan across all sites
     ds = xr.concat([data for data in column_list if data], dim="station")
+    ds = _add_station_vars(ds, sites, site_alt)
+
+    del column_list, da
     return ds
 
 
@@ -164,8 +169,13 @@ def subset_points(
     site_alt = list([x[2] for x in input_site_dict.values()])
 
     sites = list(input_site_dict.keys())
-
-    radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR["radar"])
+    try:
+        radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR["radar"])
+    except OSError:
+        logging.warning(
+            f"{nfile} failed to open and is possibly corrupt."
+            + "RadCLss will not generate a column for this file."
+        )
     # Check for single sweep scans
     if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
         radar.sweep_start_ray_index["data"] = np.ma.array([0])
@@ -210,9 +220,10 @@ def subset_points(
                         z_dict, sonde_dict = pyart.retrieve.map_profile_to_gates(
                             ds_sonde.variables[var], ds_sonde.variables["alt"], radar
                         )
+                    field_name = list(radar.fields.keys())[0]
                     # add the field to the radar file
                     radar.add_field_like(
-                        "corrected_reflectivity",
+                        field_name,
                         "sonde_" + var,
                         sonde_dict["data"],
                         replace_existing=True,
@@ -259,19 +270,7 @@ def subset_points(
 
             # Concatenate the extracted radar columns for this scan across all sites
             ds = xr.concat([data for data in column_list if data], dim="station")
-            ds["station"] = sites
-            # Assign the Main and Supplemental Site altitudes
-            ds = ds.assign(alt=("station", site_alt))
-            # Add attributes for Time, Latitude, Longitude, and Sites
-            output_config = get_output_config()
-
-            ds.gate_time.attrs.update(output_config["gate_time_attrs"])
-            ds.time_offset.attrs.update(output_config["time_offset_attrs"])
-            ds.station.attrs.update(output_config["station_attrs"])
-            ds.lat.attrs.update(output_config["lat_attrs"])
-            ds.lon.attrs.update(output_config["lon_attrs"])
-            ds.alt.attrs.update(output_config["alt_attrs"])
-
+            ds = _add_station_vars(ds, sites, site_alt)
             # delete the radar to free up memory
             del radar, column_list, da
         else:
@@ -422,3 +421,19 @@ def match_datasets_act(
                     column[k].fillna(column[k].attrs["missing_value"]).astype(float)
                 )
     return column
+
+
+def _add_station_vars(ds, sites, site_alt):
+    ds["station"] = sites
+    # Assign the Main and Supplemental Site altitudes
+    ds = ds.assign(alt=("station", site_alt))
+    # Add attributes for Time, Latitude, Longitude, and Sites
+    output_config = get_output_config()
+
+    ds.gate_time.attrs.update(output_config["gate_time_attrs"])
+    ds.time_offset.attrs.update(output_config["time_offset_attrs"])
+    ds.station.attrs.update(output_config["station_attrs"])
+    ds.lat.attrs.update(output_config["lat_attrs"])
+    ds.lon.attrs.update(output_config["lon_attrs"])
+    ds.alt.attrs.update(output_config["alt_attrs"])
+    return ds
