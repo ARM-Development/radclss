@@ -1,6 +1,6 @@
 OUTPUT_SITE = "BNF"
 OUTPUT_FACILITY = "S2"
-OUTPUT_PLATFORM = "csapr2radclss"
+OUTPUT_PLATFORM = "radclss"
 OUTPUT_LEVEL = "c2"
 OUTPUT_GATE_TIME_ATTRS = {
     "long_name": (

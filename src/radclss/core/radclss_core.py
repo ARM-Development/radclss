@@ -16,7 +16,7 @@ def radclss(
     input_site_dict,
     time_coords,
     serial=True,
-    dod_version="1.2",
+    dod_version="1.0",
     discard_var={},
     verbose=False,
     base_station="M1",
@@ -143,6 +143,7 @@ def radclss(
                     sonde=volumes["sonde"],
                     input_site_dict=input_site_dict,
                     height_bins=height_bins,
+                    rad_key=k,
                 )
 
                 successful_count = 0
@@ -186,6 +187,7 @@ def radclss(
                         sonde=volumes["sonde"],
                         input_site_dict=input_site_dict,
                         height_bins=height_bins,
+                        rad_key=k,
                     )
                     columns[k].append(result)
                     if verbose:
@@ -342,7 +344,6 @@ def radclss(
                 f"    Concatenated dimensions: time={ds_concat[k].dims['time']}, station={ds_concat[k].dims['station']}, height={ds_concat[k].dims['height']}"
             )
         ds_concat[k]["time"] = ds_concat[k].sel(station=base_station).base_time
-        ds_concat[k]["time_offset"] = ds_concat[k].sel(station=base_station).base_time
         ds_concat[k]["base_time"] = (
             ds_concat[k].sel(station=base_station).isel(time=0).base_time
         )
@@ -355,9 +356,6 @@ def radclss(
                 f"    NEXRAD dimensions: time={nexrad_columns.dims['time']}, station={nexrad_columns.dims['station']}, height={nexrad_columns.dims['height']}"
             )
         nexrad_columns["time"] = nexrad_columns.sel(station=base_station).base_time
-        nexrad_columns["time_offset"] = nexrad_columns.sel(
-            station=base_station
-        ).base_time
         nexrad_columns["base_time"] = (
             nexrad_columns.sel(station=base_station).isel(time=0).base_time
         )
@@ -439,8 +437,13 @@ def radclss(
                 "lat",
                 "lon",
                 "alt",
+                "latitude",
+                "longitude",
             ]:
-                ds_concat[k] = ds_concat[k].rename_vars({var: f"{radar_name}_{var}"})
+                if "sonde_" not in var:
+                    ds_concat[k] = ds_concat[k].rename_vars(
+                        {var: f"{radar_name[0]}_{var}"}
+                    )
 
     if nexrad_columns is not None:
         if verbose:
@@ -454,12 +457,42 @@ def radclss(
                 "lat",
                 "lon",
                 "alt",
+                "latitude",
+                "longitude",
             ]:
-                nexrad_columns = nexrad_columns.rename_vars({var: f"nexrad_{var}"})
+                if "sonde_" not in var:
+                    nexrad_columns = nexrad_columns.rename_vars({var: f"nexrad_{var}"})
 
     if verbose:
         print(f"  Merging {len(ds_concat)} radar datasets...")
+
+    # Drop time_offset since we won't need it until we write the final dataset
+    for k in ds_concat.keys():
+        if verbose:
+            print(f" Time arrays from {k}:")
+            print(ds_concat[k]["base_time"])
+        ds_concat[k] = ds_concat[k].drop(["time_offset", "base_time"])
+    nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
+    first_key = list(ds_concat.keys())[0]
+    for k in list(ds_concat.keys())[1:]:
+        for var in ds_concat[k].data_vars:
+            if var in ds_concat[first_key].data_vars:
+                if verbose:
+                    print(f"Dropping {var} from {k}")
+                ds_concat[k] = ds_concat[k].drop(var)
+
+    for var in nexrad_columns.data_vars:
+        for k in ds_concat.keys():
+            if var in ds_concat[k].data_vars:
+                if verbose:
+                    print(f"Dropping {var} from nexrad_columns")
+                nexrad_columns = nexrad_columns.drop(var)
+
     ds_concat = xr.merge([x for x in ds_concat.values()])
+    if verbose:
+        print("Output xarray dataset so far:")
+        print(ds_concat)
+
     if nexrad_columns is not None:
         if verbose:
             print("  Merging NEXRAD data into combined dataset...")
@@ -472,6 +505,9 @@ def radclss(
         print("=" * 80)
         print(f"  Platform/Level: {output_platform}.{output_level}")
         print(f"  DOD version: {dod_version}")
+        print("Variables in merged dataset:")
+        for vars in ds_concat.data_vars:
+            print(vars)
 
     ds = act.io.create_ds_from_arm_dod(
         f"{output_platform}.{output_level}",
@@ -490,9 +526,12 @@ def radclss(
         print(f"    station: {ds.sizes['station']}")
         print("\n  Assigning coordinate variables...")
 
-    ds["time"] = ds_concat.sel(station=base_station).base_time
-    ds["time_offset"] = ds_concat.sel(station=base_station).base_time
-    ds["base_time"] = ds_concat.sel(station=base_station).isel(time=0).base_time
+    # Calculate base_time as the first timestamp
+    ds["time"] = ds_concat["time"]
+    ds["base_time"] = ds_concat.time[0]
+
+    # Calculate time as seconds since base_time
+    ds["time_offset"] = ds["time"]
     ds["station"] = ds_concat["station"]
     ds["height"] = ds_concat["height"]
     ds["lat"][:] = ds_concat.isel(time=0)["lat"][:]

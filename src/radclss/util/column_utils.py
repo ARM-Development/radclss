@@ -128,7 +128,12 @@ def get_nexrad_column(
 
 
 def subset_points(
-    nfile, input_site_dict, sonde=None, height_bins=np.arange(500, 8500, 250), **kwargs
+    nfile,
+    input_site_dict,
+    sonde=None,
+    height_bins=np.arange(500, 8500, 250),
+    rad_key="radar_cmaccsapr2",
+    **kwargs,
 ):
     """
     Subset a radar file for a set of latitudes and longitudes
@@ -151,6 +156,9 @@ def subset_points(
     height_bins : numpy array, optional
         Numpy array containing the desired height bins to interpolate
         the extracted radar columns to. Default is np.arange(500, 8500, 250).
+    rad_key: str
+        The radar key to use for dropping select variables from the column
+        statistics.
     **kwargs : dict
         Additional keyword arguments.
 
@@ -170,7 +178,7 @@ def subset_points(
 
     sites = list(input_site_dict.keys())
     try:
-        radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR["radar"])
+        radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR[rad_key])
     except OSError:
         logging.warning(
             f"{nfile} failed to open and is possibly corrupt."

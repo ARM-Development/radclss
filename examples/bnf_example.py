@@ -1,3 +1,17 @@
+"""
+Example script demonstrating radclss processing with BNF site data.
+
+This example shows how to:
+- Process multiple radar systems (CSAPR2, KASACR, XSACR) with radclss
+- Integrate sonde and ground-based meteorological instruments
+- Use parallel processing with Dask distributed computing
+- Enable NEXRAD data integration for additional radar coverage
+- Generate and visualize radclss column output
+
+The script processes data from the BNF (Bankhead National Forest) site for a single date,
+combining radar volumes with ground stations at multiple locations (M1, S4, S20, S30, S40, S13).
+"""
+
 import radclss
 import glob
 import matplotlib.pyplot as plt
@@ -49,9 +63,7 @@ def main():
             nexrad=True,
         )
     my_columns.to_netcdf("nexrad_radclss_example.nc")
-    radclss.io.write_radclss_output(
-        my_columns, "radclss_example.nc", "csapr2radclss.c2"
-    )
+    radclss.io.write_radclss_output(my_columns, "radclss_example.nc", "radclss.c2")
 
     for vars in my_columns.data_vars:
         print(vars, my_columns[vars].dtype)
