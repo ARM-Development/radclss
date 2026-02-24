@@ -1,11 +1,10 @@
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
-package-dir = {"" = "src"}
 
 [project]
 name = "radclss"
-version = "2026.2.6"
+version = "2026.2.24"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +21,9 @@ dependencies = [
     "dask",
 ]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["radclss"]
+
 [project.urls]
-Homepage = "https://github.com/ARM-Development/radclss"
-Source = "github.com"
+Homepage = "https://www.github.com/ARM-Development/radclss"
