@@ -241,7 +241,7 @@ def radclss(
                 f"  NEXRAD site: {nexrad_site if nexrad_site else 'auto-detect from ARM site'}"
             )
 
-        if "radar" in time_coords:
+        if "radar" in time_coords or time_coords.lower() == "nexrad":
             time_list = sorted(
                 [
                     str(x["base_time"].dt.strftime("%Y-%m-%dT%H:%M:%S").values[0])
