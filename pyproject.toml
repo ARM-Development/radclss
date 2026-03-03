@@ -5,7 +5,7 @@ package-dir = {"" = "src"}
 
 [project]
 name = "radclss"
-version = "2026.2.6"
+version = "2026.3.3"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
 requires-python = ">=3.9"

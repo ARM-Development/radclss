@@ -11,5 +11,6 @@ dependencies:
    - pytest-cov
    - matplotlib
    - dask
+   - boto3
    - distributed
    - xarray==2025.6.1
