@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radclss"
-version = "2026.2.24"
+version = "2026.3.3"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,6 +19,7 @@ dependencies = [
     "act-atmos",
     "matplotlib",
     "dask",
+    "boto3",
 ]
 
 [tool.setuptools]

@@ -7,7 +7,7 @@ This file contains default parameters and variables used throughout RadCLss.
 
 # Define variables to drop from RadCLss from the respective datastreams
 DEFAULT_DISCARD_VAR = {
-    "radar": [
+    "radar_csapr2cmac": [
         "classification_mask",
         "uncorrected_copol_correlation_coeff",
         "uncorrected_differential_phase",
@@ -50,6 +50,14 @@ DEFAULT_DISCARD_VAR = {
         "velocity_texture",
         "simulated_velocity",
         "height_over_iso0",
+    ],
+    "radar_kasacr": [
+        "signal_to_noise_ratio_copolar_h",
+        "signal_to_noise_ratio_copolar_v",
+    ],
+    "radar_xsacr": [
+        "signal_to_noise_ratio_copolar_h",
+        "signal_to_noise_ratio_copolar_v",
     ],
     "met": [
         "base_time",
@@ -231,6 +239,8 @@ DEFAULT_DISCARD_VAR = {
         "alt",
     ],
 }
+
+DEFAULT_NEXRAD_RADARS = {"BNF": "KHTX", "SGP": "KVNX"}
 
 
 def set_discarded_variables(instrument, var_list):

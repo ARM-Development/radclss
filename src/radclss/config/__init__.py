@@ -16,3 +16,4 @@ from .output_config import (
     set_output_lon_attrs,  # noqa
     set_output_station_attrs,  # noqa
 )  # noqa
+from .default_config import DEFAULT_NEXRAD_RADARS  # noqa
