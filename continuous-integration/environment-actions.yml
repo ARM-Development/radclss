@@ -12,5 +12,6 @@ dependencies:
    - matplotlib
    - dask
    - boto3
+   - arm-test-data
    - distributed
    - xarray==2025.6.1

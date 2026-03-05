@@ -55,8 +55,8 @@ def radclss(
     time_coords : str
         The instrument to base the time coordinates off of, or an averaging interval
         in minutes or seconds. For example "radar_csapr2cmac" will use the CSAPR2 times as
-        the time coordinate for all of the data. "5Min" will average all data to a five
-        minute resolution using pandas date_range.
+        the time coordinate for all of the data. NEXRAD is currently not supported as a time coordinate, but can be used as a reference for reindexing.
+         If the specified time coordinate is not found in the volumes, then an error will be raised.
     serial : bool, optional
         Option to denote serial processing. Set to False to use dask cluster for
         subsetting columns in parallel. Default is True.
@@ -90,6 +90,9 @@ def radclss(
     if discard_var == {}:
         discard_var = DEFAULT_DISCARD_VAR
 
+    if "sonde" not in volumes.keys():
+        volumes["sonde"] = None
+
     if verbose:
         print("=" * 80)
         print(f"RadCLss Processing for {volumes['date']}")
@@ -114,7 +117,10 @@ def radclss(
         if verbose:
             print(f"Using {time_coords} as time basis")
             print(f"Number of {time_coords} files: {len(volumes[time_coords])}")
-
+    else:
+        raise NotImplementedError(
+            "Currently, only radar-based time coordinates are supported. Please specify a radar key from the volumes dictionary as the time_coords argument."
+        )
     # Call Subset Points
     columns = {}
     if verbose:
@@ -241,18 +247,13 @@ def radclss(
                 f"  NEXRAD site: {nexrad_site if nexrad_site else 'auto-detect from ARM site'}"
             )
 
-        if "radar" in time_coords or time_coords.lower() == "nexrad":
+        if "radar" in time_coords:
             time_list = sorted(
                 [
                     str(x["base_time"].dt.strftime("%Y-%m-%dT%H:%M:%S").values[0])
                     for x in columns[time_coords]
                 ]
             )
-        else:
-            time_list = [
-                x.strftime("%Y-%m-%dT%H:%M:%S")
-                for x in pd.date_range(min_time, max_time, time_coords)
-            ]
 
         if verbose:
             print(f"  Number of NEXRAD time steps to fetch: {len(time_list)}")
@@ -620,6 +621,8 @@ def radclss(
         # Find all of the met stations and match to columns
         vol_keys = list(volumes.keys())
         for k in vol_keys:
+            if k == "sonde":
+                continue
             if len(volumes[k]) == 0:
                 if verbose:
                     print(f"No files found for instrument/site: {k}")

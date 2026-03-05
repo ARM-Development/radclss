@@ -132,7 +132,7 @@ def subset_points(
     input_site_dict,
     sonde=None,
     height_bins=np.arange(500, 8500, 250),
-    rad_key="radar_cmaccsapr2",
+    rad_key="radar_csapr2",
     **kwargs,
 ):
     """
