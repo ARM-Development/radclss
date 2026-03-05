@@ -162,13 +162,12 @@ def radclss(
                             print(
                                 f"  Completed {successful_count}/{len(volumes[k])} files..."
                             )
-                    except Exception as error:
+                    except Exception:
                         failed_count += 1
                         if verbose:
                             print(
                                 f"  ERROR processing file (total failures: {failed_count})"
                             )
-                        logging.log.exception(error)
 
                 if verbose:
                     print(
