@@ -25,7 +25,7 @@ jobs:
         matrix:
           python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
           os: [macOS, ubuntu]
-          inlcude:
+          include:
             - os: macos-latest
               PLAT: arm64
               INTERFACE64: ""
