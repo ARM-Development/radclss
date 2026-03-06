@@ -50,7 +50,7 @@ def get_nexrad_column(
 
     """
     if nexrad_radar is None:
-        if site in DEFAULT_NEXRAD_RADARS.keys():
+        if site.lower() in DEFAULT_NEXRAD_RADARS.keys():
             nexrad_radar = DEFAULT_NEXRAD_RADARS[site]
         else:
             raise UserWarning(

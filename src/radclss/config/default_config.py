@@ -262,7 +262,7 @@ DEFAULT_DISCARD_VAR = {
     ],
 }
 
-DEFAULT_NEXRAD_RADARS = {"BNF": "KHTX", "SGP": "KVNX"}
+DEFAULT_NEXRAD_RADARS = {"bnf": "KHTX", "sgp": "KVNX"}
 
 
 def set_discarded_variables(instrument, var_list):
