@@ -12,9 +12,9 @@ authors = [{ name = "rjackson" }, {name = "jrobrien91"}]
 license = { text = "MIT" }
 dependencies = [
     "arm_pyart",
-    "numpy<=2.4.0",
+    "numpy",
     "xarray",
-    "pandas",
+    "pandas==2.2.3",
     "xradar",
     "act-atmos",
     "matplotlib",
