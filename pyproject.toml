@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radclss"
-version = "2026.3.5"
+version = "2026.3.6"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "rjackson" }, {name = "jrobrien91"}]
 license = { text = "MIT" }
 dependencies = [
     "arm_pyart",
-    "numpy",
+    "numpy<=2.4.0",
     "xarray",
     "pandas",
     "xradar",
