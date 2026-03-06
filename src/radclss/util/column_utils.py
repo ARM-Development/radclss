@@ -300,7 +300,8 @@ def match_datasets_act(
 ):
     """
     Time synchronization of a Ground Instrumentation Dataset to
-    a Radar Column for Specific Locations using the ARM ACT package
+    a Radar Column for Specific Locations using the ARM ACT package.
+    This module also supports vertically pointing radars such as the KAZR.
 
     Parameters
     ----------
@@ -367,10 +368,23 @@ def match_datasets_act(
     # Check to see if height is a dimension within the ground instrumentation.
     # If so, first interpolate heights to match radar, before interpolating time.
     if "height" in grd_ds.dims:
-        grd_ds = grd_ds.interp(height=np.arange(3150, 10050, 50), method="linear")
+        grd_ds = grd_ds.interp(height=column["height"], method="linear")
+
+    if "range" in grd_ds.dims:
+        grd_ds = grd_ds.interp(range=column["height"], method="linear")
+        grd_ds = grd_ds.drop_vars("height")
+        grd_ds = grd_ds.rename({"range": "height"})
 
     # Resample the ground data to 5 min and interpolate to the radar time.
     # Keep data variable attributes to help distingish between instruments/locations
+    # Keep only numeric data variables to avoid issues with resampling non-numeric variables (e.g. lat/lon)
+    non_numeric_vars = [
+        var
+        for var in grd_ds.data_vars
+        if not np.issubdtype(grd_ds[var].dtype, np.number)
+    ]
+
+    grd_ds = grd_ds.drop_vars(non_numeric_vars)
     if resample == "mean":
         matched = (
             grd_ds.resample(time=resample_time, closed="right")

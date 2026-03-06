@@ -631,6 +631,19 @@ def radclss(
             else:
                 instrument = k
                 site = base_station
+
+            if instrument == "kazr2":
+                if verbose:
+                    print(f"Matching KAZR2 data for site: {site}")
+                ds = match_datasets_act(
+                    ds,
+                    volumes[k],
+                    site.upper(),
+                    discard=discard_var["kazr2"],
+                    resample="mean",
+                    prefix="kazr2_",
+                    verbose=verbose,
+                )
             if instrument == "met":
                 if verbose:
                     print(f"Matching MET data for site: {site}")

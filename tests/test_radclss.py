@@ -560,6 +560,148 @@ def test_radclss_with_kasacr():
                 ).all(), f"All KASACR data is missing for station {site}"
 
 
+def test_radclss_with_kazr():
+    """
+    Test radclss with a vertically pointing radar.
+    """
+    test_data_path = arm_test_data.DATASETS.abspath
+
+    # Before testing, ensure that ARM credentials are set in environment variables
+    username = os.getenv("ARM_USERNAME")
+    token = os.getenv("ARM_PASSWORD")
+    if not username or not token:
+        return  # Skip test if credentials are not set
+
+    # Download CSAPR2 data
+    act.discovery.download_arm_data(
+        username,
+        token,
+        "bnfcsapr2cfrS3.a1",
+        "2025-06-01T12:00:00",
+        "2025-06-01T12:30:00",
+        output=test_data_path,
+    )
+
+    # Download KASACR data
+    act.discovery.download_arm_data(
+        username,
+        token,
+        "bnfkazr2cfrprM1.a1",
+        "2025-06-01T12:00:00",
+        "2025-06-01T12:30:00",
+        output=test_data_path,
+    )
+
+    # Download sonde data
+    act.discovery.download_arm_data(
+        username,
+        token,
+        "bnfsondewnpnM1.b1",
+        "2025-06-01T00:00:00",
+        "2025-06-02T00:00:00",
+        output=test_data_path,
+    )
+
+    # Fetch any other test data
+    for files in arm_test_data.DATASETS.registry.keys():
+        if "bnf" in files:
+            if not os.path.exists(os.path.join(test_data_path, files)):
+                arm_test_data.DATASETS.fetch(files)
+
+    # Gather all the radar files
+    csapr2_files = sorted(
+        glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc"))
+    )
+    kazr_files = sorted(
+        glob.glob(os.path.join(test_data_path, "*bnfkazr2cfrprM1.a1*.nc"))
+    )
+    sonde_files = sorted(
+        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+    )
+
+    # Gather other instrument files
+    vd_M1_files = glob.glob(os.path.join(test_data_path, "*bnfvdisquantsM1.c1*nc"))
+    met_M1_files = glob.glob(os.path.join(test_data_path, "*bnfmetM1.b1*"))
+    met_S20_files = glob.glob(os.path.join(test_data_path, "*bnfmetS20.b1*"))
+    met_S30_files = glob.glob(os.path.join(test_data_path, "*bnfmetS30.b1*"))
+    met_S40_files = glob.glob(os.path.join(test_data_path, "*bnfmetS40.b1*"))
+    wxt_S13_files = glob.glob(os.path.join(test_data_path, "*bnfmetwxtS13.b1*nc"))
+    pluvio_M1_files = glob.glob(os.path.join(test_data_path, "*bnfwbpluvio2M1.a1*nc"))
+    ld_M1_files = glob.glob(os.path.join(test_data_path, "*bnfldquantsM1.c1*nc"))
+    ld_S30_files = glob.glob(os.path.join(test_data_path, "*bnfldquantsS30.c1*nc"))
+
+    volumes = {
+        "date": "20250619",
+        "radar_csapr2": csapr2_files,
+        "kazr2_M1": kazr_files,
+        "sonde": sonde_files,
+        "vd_M1": vd_M1_files,
+        "met_M1": met_M1_files,
+        "met_S20": met_S20_files,
+        "met_S30": met_S30_files,
+        "met_S40": met_S40_files,
+        "wxt_S13": wxt_S13_files,
+        "pluvio_M1": pluvio_M1_files,
+        "ld_M1": ld_M1_files,
+        "ld_S30": ld_S30_files,
+    }
+
+    input_site_dict = {
+        "M1": (34.34525, -87.33842, 293),
+        "S4": (34.46451, -87.23598, 197),
+        "S20": (34.65401, -87.29264, 178),
+        "S30": (34.38501, -86.92757, 183),
+        "S40": (34.17932, -87.45349, 236),
+        "S13": (34.343889, -87.350556, 286),
+    }
+
+    my_columns = radclss.core.radclss(
+        volumes, input_site_dict, "radar_csapr2", serial=True, verbose=False
+    )
+
+    # Basic structure checks
+    assert isinstance(my_columns, xr.Dataset)
+    assert my_columns.dims["station"] == 6
+    assert np.array_equal(
+        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
+    )
+
+    # Check that CSAPR2 data exists
+    assert (
+        "csapr2_reflectivity" in my_columns.data_vars
+        or "reflectivity" in my_columns.data_vars
+    )
+
+    # Check that we are on CSAPR2 timestamps
+    assert len(my_columns["time"].values) == 11, "Expected time values in dataset"
+
+    # Check that KAZ data exists if files were downloaded
+    if len(kazr_files) > 0:
+        # Look for KAZR variables (they should have kazr prefix)
+        kazr_vars = [var for var in my_columns.data_vars if "kazr" in var.lower()]
+        assert len(kazr_vars) > 0, "Expected KAZR variables in dataset"
+
+        # Check that KAZR reflectivity data exists
+        for site in my_columns["station"].values:
+            # Find reflectivity variable for KAZR
+            kazr_refl_vars = [
+                var
+                for var in my_columns.data_vars
+                if "kazr" in var.lower() and "reflectivity" in var.lower()
+            ]
+            if len(kazr_refl_vars) > 0:
+                kazr_refl = kazr_refl_vars[0]
+                missing_value = (
+                    my_columns[kazr_refl]
+                    .sel(station=site)
+                    .attrs.get("missing_value", None)
+                )
+                # At least some data should be non-missing
+                assert not (
+                    my_columns[kazr_refl].sel(station=site) == missing_value
+                ).all(), f"All KAZR data is missing for station {site}"
+
+
 def test_radclss_parallel_with_nexrad():
     """
     Test radclss in parallel mode with CSAPR2 and NEXRAD data.
