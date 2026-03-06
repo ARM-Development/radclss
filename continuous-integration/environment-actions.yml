@@ -15,5 +15,5 @@ dependencies:
    - arm-test-data
    - distributed
    - xarray
-   - pandas==2.2.3
-   - numpy
+   - pandas
+   - numpy<=2.4.0
