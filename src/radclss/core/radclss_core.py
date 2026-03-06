@@ -295,7 +295,7 @@ def radclss(
                         print(
                             f"  ERROR fetching NEXRAD data (total failures: {failed_count})"
                         )
-                    logging.log.exception(error)
+                    logging.exception(error)
 
             if verbose:
                 print(

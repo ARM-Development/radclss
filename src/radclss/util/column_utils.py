@@ -50,8 +50,8 @@ def get_nexrad_column(
 
     """
     if nexrad_radar is None:
-        if site in DEFAULT_NEXRAD_RADARS.keys():
-            nexrad_radar = DEFAULT_NEXRAD_RADARS[site]
+        if site.lower() in DEFAULT_NEXRAD_RADARS.keys():
+            nexrad_radar = DEFAULT_NEXRAD_RADARS[site.lower()]
         else:
             raise UserWarning(
                 f"There are no NEXRAD radars within 100 km of {site}. Returning None."
