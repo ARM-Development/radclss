@@ -16,3 +16,4 @@ dependencies:
    - distributed
    - xarray
    - pandas
+   - numpy<2.4.0
