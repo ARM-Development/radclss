@@ -442,6 +442,7 @@ def match_datasets_act(
                 column[k] = (
                     column[k].fillna(column[k].attrs["missing_value"]).astype(float)
                 )
+    grd_ds.close()
     return column
 
 
