@@ -248,6 +248,7 @@ def subset_points(
                     ]
                     radar.fields["sonde_" + var]["datastream"] = ds_sonde.datastream
 
+                ds_sonde.close()
                 del radar_start, sonde_start, ds_sonde
                 del z_dict, sonde_dict
 
@@ -357,9 +358,12 @@ def match_datasets_act(
         grd_ds = ground
     else:
         # Read in the file using ACT
-        grd_ds = act.io.read_arm_netcdf(ground, cleanup_qc=True, drop_variables=discard)
-        # Default are Lazy Arrays; convert for matching with column
-        grd_ds = grd_ds.compute()
+        _grd_raw = act.io.read_arm_netcdf(
+            ground, cleanup_qc=True, drop_variables=discard
+        )
+        # Default are Lazy Arrays; convert for matching with column, then close the file handle
+        grd_ds = _grd_raw.compute()
+        _grd_raw.close()
         # check if a list containing new variable names exists.
         if prefix:
             grd_ds = grd_ds.rename_vars({v: f"{prefix}{v}" for v in grd_ds.data_vars})

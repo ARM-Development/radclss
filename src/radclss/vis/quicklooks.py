@@ -102,6 +102,9 @@ def create_radclss_columns(
             )
         ).plot(y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs)
 
+    if isinstance(radclss, str):
+        ds.close()
+
     return fig, axarr
 
 
