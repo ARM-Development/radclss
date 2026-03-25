@@ -4,12 +4,15 @@ import xarray as xr
 import act
 import numpy as np
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed as futures_as_completed
 
 from ..util.column_utils import (
     subset_points,
-    match_datasets_act,
     get_nexrad_column,
     _log_open_hdf5,
+    _prepare_match,
+    _apply_match,
 )
 from ..config.default_config import DEFAULT_DISCARD_VAR
 from ..config.output_config import get_output_config
@@ -310,17 +313,27 @@ def radclss(
                 )
         else:
             if verbose:
-                print("  Processing NEXRAD columns in serial mode...")
-            for i, time_str in enumerate(time_list, 1):
-                if verbose and i % 5 == 0:
-                    print(f"  [{i}/{len(time_list)}] Fetching NEXRAD for {time_str}")
-                nexrad_columns.append(
-                    get_nexrad_column(
-                        time_str,
+                print(f"  Fetching {len(time_list)} NEXRAD columns via thread pool...")
+            with ThreadPoolExecutor() as pool:
+                futs = {
+                    pool.submit(
+                        get_nexrad_column,
+                        t,
                         output_config["site"],
                         input_site_dict,
-                    )
-                )
+                        nexrad_site,
+                    ): t
+                    for t in time_list
+                }
+                for fut in futures_as_completed(futs):
+                    try:
+                        result = fut.result()
+                        if result is not None:
+                            nexrad_columns.append(result)
+                    except Exception as exc:
+                        logging.warning(
+                            "NEXRAD fetch failed for %s: %s", futs[fut], exc
+                        )
 
         if verbose:
             valid_nexrad = sum(1 for x in nexrad_columns if x is not None)
@@ -342,12 +355,20 @@ def radclss(
     output_platform = output_config["platform"]
     output_level = output_config["level"]
 
-    # Convert time variables to something xarray understands
+    # Convert time variables to something xarray understands.
+    # Concat in chunks of 50 so only a fraction of per-file datasets are held in
+    # memory at once before being folded into an intermediate result.
+    _CONCAT_CHUNK = 50
     ds_concat = {}
     for k in columns.keys():
         if verbose:
             print(f"  Processing {k}...")
-        ds_concat[k] = xr.concat([data for data in columns[k] if data], dim="time")
+        valid = [data for data in columns[k] if data is not None]
+        chunks = [
+            xr.concat(valid[i : i + _CONCAT_CHUNK], dim="time")
+            for i in range(0, len(valid), _CONCAT_CHUNK)
+        ]
+        ds_concat[k] = xr.concat(chunks, dim="time") if len(chunks) > 1 else chunks[0]
         if verbose:
             print(
                 f"    Concatenated dimensions: time={ds_concat[k].dims['time']}, station={ds_concat[k].dims['station']}, height={ds_concat[k].dims['height']}"
@@ -506,7 +527,7 @@ def radclss(
         if verbose:
             print("  Merging NEXRAD data into combined dataset...")
         ds_concat = xr.merge([ds_concat, nexrad_columns])
-    
+
     if verbose:
         print(f"  Total variables in merged dataset: {len(ds_concat.data_vars)}")
         print("\n" + "=" * 80)
@@ -620,8 +641,7 @@ def radclss(
                 )
         current_client.restart()
     del ds_concat
-    
-    
+
     # Free up Memory
     del columns
 
@@ -636,7 +656,10 @@ def radclss(
             print("=" * 80)
             print(f"  Radar processing completed at: {time.strftime('%H:%M:%S')}")
 
-        # Find all of the met stations and match to columns
+        # Build a task list: (label, site, _prepare_match kwargs) for every instrument.
+        # All entries are independent so we can load+resample them concurrently, then
+        # apply results sequentially into ds.
+        _instrument_tasks = []
         vol_keys = list(volumes.keys())
         for k in vol_keys:
             if k == "sonde":
@@ -650,75 +673,123 @@ def radclss(
             else:
                 instrument = k
                 site = base_station
+            site = site.upper()
 
             if instrument == "kazr2":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["kazr2"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                            prefix="kazr2_",
+                        ),
+                    )
+                )
+            elif instrument == "met":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k][0],
+                            site=site,
+                            discard=discard_var["met"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                        ),
+                    )
+                )
+            elif instrument == "pluvio":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["pluvio"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="sum",
+                        ),
+                    )
+                )
+            elif instrument == "ld":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["ldquants"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                            prefix="ldquants_",
+                        ),
+                    )
+                )
+            elif instrument == "vd":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["vdisquants"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                            prefix="vdisquants_",
+                        ),
+                    )
+                )
+            elif instrument == "wxt":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["wxt"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                        ),
+                    )
+                )
+
+        if verbose:
+            print(
+                f"  Loading {len(_instrument_tasks)} ground instrument file(s) in parallel..."
+            )
+
+        # Parallel I/O + resample — each task reads its own files independently
+        with ThreadPoolExecutor() as pool:
+            _futs = {
+                pool.submit(_prepare_match, **kwargs): (k, site)
+                for k, site, kwargs in _instrument_tasks
+            }
+
+        # Sequential apply — in-place writes to ds must not overlap
+        for fut, (k, site) in _futs.items():
+            try:
+                _, matched = fut.result()
+                ds = _apply_match(ds, site, matched)
                 if verbose:
-                    print(f"Matching KAZR2 data for site: {site}")
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k],
-                    site.upper(),
-                    discard=discard_var["kazr2"],
-                    resample="mean",
-                    prefix="kazr2_",
-                    verbose=verbose,
-                )
-            if instrument == "met":
-                if verbose:
-                    print(f"Matching MET data for site: {site}")
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k][0],
-                    site.upper(),
-                    resample="mean",
-                    discard=discard_var["met"],
-                    verbose=verbose,
-                )
-
-            if instrument == "pluvio":
-                # Weighing Bucket Rain Gauge
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k],
-                    site.upper(),
-                    resample="sum",
-                    discard=discard_var["pluvio"],
-                    verbose=verbose,
-                )
-
-            if instrument == "ld":
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k],
-                    site.upper(),
-                    discard=discard_var["ldquants"],
-                    resample="mean",
-                    prefix="ldquants_",
-                    verbose=verbose,
-                )
-
-            if instrument == "vd":
-                # Laser Disdrometer - Supplemental Site
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k],
-                    site.upper(),
-                    discard=discard_var["vdisquants"],
-                    resample="mean",
-                    prefix="vdisquants_",
-                    verbose=verbose,
-                )
-
-            if instrument == "wxt":
-                # Laser Disdrometer - Supplemental Site
-                ds = match_datasets_act(
-                    ds,
-                    volumes[k],
-                    site.upper(),
-                    discard=discard_var["wxt"],
-                    resample="mean",
-                    verbose=verbose,
-                )
+                    print(f"  Matched {k} for site {site}")
+            except Exception as exc:
+                logging.warning("Failed to match %s for site %s: %s", k, site, exc)
 
     else:
         # There is no column extraction

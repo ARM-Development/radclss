@@ -14,6 +14,17 @@ from botocore import UNSIGNED
 from ..config import DEFAULT_DISCARD_VAR, DEFAULT_NEXRAD_RADARS
 from ..config import get_output_config
 
+_sonde_cache = {}
+
+
+def _read_sonde_cached(path, exclude):
+    """Return a fully-loaded sonde dataset, reading from disk only on first call."""
+    if path not in _sonde_cache:
+        raw = act.io.read_arm_netcdf(path, cleanup_qc=True, drop_variables=exclude)
+        _sonde_cache[path] = raw.compute()
+        raw.close()
+    return _sonde_cache[path]
+
 
 def _log_open_hdf5(label=""):
     """Log all currently open HDF5 file handles via h5py's low-level API."""
@@ -239,12 +250,9 @@ def subset_points(
                 # difference in time between radar file and each sonde file
                 start_diff = [radar_start - sonde for sonde in sonde_start]
 
-                # merge the sonde file into the radar object
-                ds_sonde = act.io.read_arm_netcdf(
-                    sonde[start_diff.index(min(start_diff))],
-                    cleanup_qc=True,
-                    drop_variables=exclude_sonde,
-                )
+                # merge the sonde file into the radar object (cached across radar files)
+                sonde_path = sonde[start_diff.index(min(start_diff))]
+                ds_sonde = _read_sonde_cached(sonde_path, exclude_sonde)
 
                 # create list of variables within sonde dataset to add to the radar file
                 for var in list(ds_sonde.keys()):
@@ -267,7 +275,6 @@ def subset_points(
                     ]
                     radar.fields["sonde_" + var]["datastream"] = ds_sonde.datastream
 
-                ds_sonde.close()
                 del radar_start, sonde_start, ds_sonde
                 del z_dict, sonde_dict
 
@@ -309,6 +316,108 @@ def subset_points(
         del radar
         _log_open_hdf5("subset_points after del radar")
     return ds
+
+
+def _prepare_match(
+    ground,
+    site,
+    discard,
+    column_time,
+    column_height,
+    resample="sum",
+    resample_time="5Min",
+    DataSet=False,
+    prefix=None,
+):
+    """
+    Load a ground instrument file, resample it to the column time/height grid,
+    and return ``(site, matched_dataset)`` without modifying the column in-place.
+
+    Safe to call concurrently from multiple threads.
+    """
+    if DataSet:
+        grd_ds = ground
+    else:
+        _grd_raw = act.io.read_arm_netcdf(
+            ground, cleanup_qc=True, drop_variables=discard
+        )
+        grd_ds = _grd_raw.compute()
+        _grd_raw.close()
+        if prefix:
+            grd_ds = grd_ds.rename_vars({v: f"{prefix}{v}" for v in grd_ds.data_vars})
+
+    if "base_time" in grd_ds.data_vars:
+        del grd_ds["base_time"]
+
+    if "height" in grd_ds.dims:
+        grd_ds = grd_ds.interp(height=column_height, method="linear")
+
+    if "range" in grd_ds.dims:
+        grd_ds = grd_ds.interp(range=column_height, method="linear")
+        grd_ds = grd_ds.drop_vars("height")
+        grd_ds = grd_ds.rename({"range": "height"})
+
+    non_numeric_vars = [
+        var
+        for var in grd_ds.data_vars
+        if not np.issubdtype(grd_ds[var].dtype, np.number)
+    ]
+    grd_ds = grd_ds.drop_vars(non_numeric_vars)
+
+    if resample == "mean":
+        matched = (
+            grd_ds.resample(time=resample_time, closed="right")
+            .mean(keep_attrs=True)
+            .interp(time=column_time, method="linear")
+        )
+    elif resample == "skip":
+        matched = grd_ds.interp(time=column_time, method="linear")
+    elif resample == "sum":
+        matched = (
+            grd_ds.resample(time=resample_time, closed="right")
+            .sum(keep_attrs=True)
+            .interp(time=column_time, method="linear")
+        )
+    else:
+        raise ValueError(
+            "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
+        )
+
+    matched = matched.assign_coords(coords=dict(station=site))
+    matched = matched.expand_dims("station")
+
+    for attr in ("lat", "lon", "alt"):
+        if attr in matched.data_vars:
+            del matched[attr]
+
+    for var in matched.data_vars:
+        matched[var].attrs.update(source=matched.datastream)
+
+    return site, matched
+
+
+def _apply_match(column, site, matched):
+    """Merge a prepared match result into ``column`` in-place and return it."""
+    for k in matched.data_vars:
+        if k in column.data_vars:
+            column[k].sel(station=site)[:] = matched.sel(station=site)[k][:].astype(
+                column[k].dtype
+            )
+            if "_FillValue" in column[k].attrs:
+                if isinstance(column[k].attrs["_FillValue"], str):
+                    column[k].attrs["_FillValue"] = float(column[k].attrs["_FillValue"])
+                column[k] = (
+                    column[k].fillna(column[k].attrs["_FillValue"]).astype(float)
+                )
+            if "missing_value" in column[k].attrs:
+                if isinstance(column[k].attrs["missing_value"], str):
+                    column[k].attrs["missing_value"] = float(
+                        column[k].attrs["missing_value"]
+                    )
+                column[k] = (
+                    column[k].fillna(column[k].attrs["missing_value"]).astype(float)
+                )
+    return column
 
 
 def match_datasets_act(
@@ -373,104 +482,18 @@ def match_datasets_act(
         Xarray Dataset containing the time-synced in-situ ground observations with
         the inputed radar column
     """
-    # Check to see if input is xarray DataSet or a file path
-    if DataSet:
-        grd_ds = ground
-    else:
-        # Read in the file using ACT
-        _grd_raw = act.io.read_arm_netcdf(
-            ground, cleanup_qc=True, drop_variables=discard
-        )
-        # Default are Lazy Arrays; convert for matching with column, then close the file handle
-        grd_ds = _grd_raw.compute()
-        _grd_raw.close()
-        # check if a list containing new variable names exists.
-        if prefix:
-            grd_ds = grd_ds.rename_vars({v: f"{prefix}{v}" for v in grd_ds.data_vars})
-
-    # Remove Base_Time before Resampling Data since you can't force 1 datapoint to 5 min sum
-    if "base_time" in grd_ds.data_vars:
-        del grd_ds["base_time"]
-
-    # Check to see if height is a dimension within the ground instrumentation.
-    # If so, first interpolate heights to match radar, before interpolating time.
-    if "height" in grd_ds.dims:
-        grd_ds = grd_ds.interp(height=column["height"], method="linear")
-
-    if "range" in grd_ds.dims:
-        grd_ds = grd_ds.interp(range=column["height"], method="linear")
-        grd_ds = grd_ds.drop_vars("height")
-        grd_ds = grd_ds.rename({"range": "height"})
-
-    # Resample the ground data to 5 min and interpolate to the radar time.
-    # Keep data variable attributes to help distingish between instruments/locations
-    # Keep only numeric data variables to avoid issues with resampling non-numeric variables (e.g. lat/lon)
-    non_numeric_vars = [
-        var
-        for var in grd_ds.data_vars
-        if not np.issubdtype(grd_ds[var].dtype, np.number)
-    ]
-
-    grd_ds = grd_ds.drop_vars(non_numeric_vars)
-    if resample == "mean":
-        matched = (
-            grd_ds.resample(time=resample_time, closed="right")
-            .mean(keep_attrs=True)
-            .interp(time=column.time, method="linear")
-        )
-    elif resample == "skip":
-        matched = grd_ds.interp(time=column.time, method="linear")
-    elif resample == "sum":
-        matched = (
-            grd_ds.resample(time=resample_time, closed="right")
-            .sum(keep_attrs=True)
-            .interp(time=column.time, method="linear")
-        )
-    else:
-        raise ValueError(
-            "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
-        )
-
-    # Add site location as a dimension for the Pluvio data
-    matched = matched.assign_coords(coords=dict(station=site))
-    matched = matched.expand_dims("station")
-
-    # Remove Lat/Lon Data variables as it is included within the Matched Dataset with Site Identfiers
-    if "lat" in matched.data_vars:
-        del matched["lat"]
-    if "lon" in matched.data_vars:
-        del matched["lon"]
-    if "alt" in matched.data_vars:
-        del matched["alt"]
-
-    # Update the individual Variables to Hold Global Attributes
-    # global attributes will be lost on merging into the matched dataset.
-    # Need to keep as many references and descriptors as possible
-    for var in matched.data_vars:
-        matched[var].attrs.update(source=matched.datastream)
-
-    # Merge the two DataSets
-    for k in matched.data_vars:
-        if k in column.data_vars:
-            column[k].sel(station=site)[:] = matched.sel(station=site)[k][:].astype(
-                column[k].dtype
-            )
-            if "_FillValue" in column[k].attrs:
-                if isinstance(column[k].attrs["_FillValue"], str):
-                    column[k].attrs["_FillValue"] = float(column[k].attrs["_FillValue"])
-                column[k] = (
-                    column[k].fillna(column[k].attrs["_FillValue"]).astype(float)
-                )
-            if "missing_value" in column[k].attrs:
-                if isinstance(column[k].attrs["missing_value"], str):
-                    column[k].attrs["missing_value"] = float(
-                        column[k].attrs["missing_value"]
-                    )
-                column[k] = (
-                    column[k].fillna(column[k].attrs["missing_value"]).astype(float)
-                )
-    grd_ds.close()
-    return column
+    _, matched = _prepare_match(
+        ground,
+        site,
+        discard,
+        column.time,
+        column["height"],
+        resample=resample,
+        resample_time=resample_time,
+        DataSet=DataSet,
+        prefix=prefix,
+    )
+    return _apply_match(column, site, matched)
 
 
 def _add_station_vars(ds, sites, site_alt):
