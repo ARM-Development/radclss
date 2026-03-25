@@ -497,7 +497,7 @@ def radclss(
         if verbose:
             print("  Merging NEXRAD data into combined dataset...")
         ds_concat = xr.merge([ds_concat, nexrad_columns])
-
+    
     if verbose:
         print(f"  Total variables in merged dataset: {len(ds_concat.data_vars)}")
         print("\n" + "=" * 80)
@@ -508,7 +508,6 @@ def radclss(
         print("Variables in merged dataset:")
         for vars in ds_concat.data_vars:
             print(vars)
-
     ds = act.io.create_ds_from_arm_dod(
         f"{output_platform}.{output_level}",
         {
@@ -601,8 +600,19 @@ def radclss(
     # Drop duplicate latitude and longitude
     if verbose:
         print("\n  Freeing memory: deleting intermediate datasets...")
+    ds_concat.close()
+    if serial is not True:
+        if current_client is None:
+            try:
+                current_client = Client.current()
+            except ValueError:
+                raise RuntimeError(
+                    "No Dask client found. Please start a Dask client before running in parallel mode."
+                )
+        current_client.restart()
     del ds_concat
-
+    
+    
     # Free up Memory
     del columns
 
