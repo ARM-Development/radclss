@@ -95,29 +95,32 @@ def get_nexrad_column(
     time_list = np.array(time_list)
     path = f"s3://{bucket_name}/" + file_list[np.argmin(np.abs(time_list - right_now))]
     radar_obj = pyart.io.read_nexrad_archive(path)
-    column_list = []
-    for lat, lon in zip(lats, lons):
-        # Make sure we are interpolating from the radar's location above sea level
-        # NOTE: interpolating throughout Troposphere to match sonde to in the future
+    try:
+        column_list = []
+        for lat, lon in zip(lats, lons):
+            # Make sure we are interpolating from the radar's location above sea level
+            # NOTE: interpolating throughout Troposphere to match sonde to in the future
 
-        da = pyart.util.columnsect.column_vertical_profile(radar_obj, lat, lon)
-        # check for valid heights
-        valid = np.isfinite(da["height"])
-        n_valid = int(valid.sum())
-        if n_valid > 0:
-            da = da.sel(height=valid).sortby("height").interp(height=height_bins)
-        else:
-            target_height = xr.DataArray(height_bins, dims="height", name="height")
-            da = da.reindex(height=target_height)
+            da = pyart.util.columnsect.column_vertical_profile(radar_obj, lat, lon)
+            # check for valid heights
+            valid = np.isfinite(da["height"])
+            n_valid = int(valid.sum())
+            if n_valid > 0:
+                da = da.sel(height=valid).sortby("height").interp(height=height_bins)
+            else:
+                target_height = xr.DataArray(height_bins, dims="height", name="height")
+                da = da.reindex(height=target_height)
 
-        # Add the latitude and longitude of the extracted column
-        da["lat"], da["lon"] = lat, lon
-        # Convert timeoffsets to timedelta object and precision on datetime64
-        da.time_offset.data = da.time_offset.values.astype("timedelta64[s]")
-        da.base_time.data = da.base_time.values.astype("datetime64[s]")
-        # Time is based off the start of the radar volume
-        da["gate_time"] = da.base_time.values + da.isel(height=0).time_offset.values
-        column_list.append(da)
+            # Add the latitude and longitude of the extracted column
+            da["lat"], da["lon"] = lat, lon
+            # Convert timeoffsets to timedelta object and precision on datetime64
+            da.time_offset.data = da.time_offset.values.astype("timedelta64[s]")
+            da.base_time.data = da.base_time.values.astype("datetime64[s]")
+            # Time is based off the start of the radar volume
+            da["gate_time"] = da.base_time.values + da.isel(height=0).time_offset.values
+            column_list.append(da)
+    finally:
+        del radar_obj
 
     # Concatenate the extracted radar columns for this scan across all sites
     ds = xr.concat([data for data in column_list if data], dim="station")
@@ -184,12 +187,14 @@ def subset_points(
             f"{nfile} failed to open and is possibly corrupt."
             + "RadCLss will not generate a column for this file."
         )
-    # Check for single sweep scans
-    if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
-        radar.sweep_start_ray_index["data"] = np.ma.array([0])
-        radar.sweep_end_ray_index["data"] = np.ma.array([radar.nrays])
+        return ds
 
-    if radar:
+    try:
+        # Check for single sweep scans
+        if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
+            radar.sweep_start_ray_index["data"] = np.ma.array([0])
+            radar.sweep_end_ray_index["data"] = np.ma.array([radar.nrays])
+
         if radar.time["data"].size > 0:
             # Easier to map the nearest sonde file to radar gates before extraction
             if sonde is not None:
@@ -279,11 +284,9 @@ def subset_points(
             # Concatenate the extracted radar columns for this scan across all sites
             ds = xr.concat([data for data in column_list if data], dim="station")
             ds = _add_station_vars(ds, sites, site_alt)
-            # delete the radar to free up memory
-            del radar, column_list, da
-        else:
-            # delete the rhi file
-            del radar
+            del column_list, da
+    finally:
+        del radar
     return ds
 
 
