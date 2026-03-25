@@ -5,7 +5,12 @@ import act
 import numpy as np
 import pandas as pd
 
-from ..util.column_utils import subset_points, match_datasets_act, get_nexrad_column
+from ..util.column_utils import (
+    subset_points,
+    match_datasets_act,
+    get_nexrad_column,
+    _log_open_hdf5,
+)
 from ..config.default_config import DEFAULT_DISCARD_VAR
 from ..config.output_config import get_output_config
 from dask.distributed import Client, as_completed
@@ -209,6 +214,8 @@ def radclss(
                         f"  Finished {k}: {successful}/{len(columns[k])} successful extractions"
                     )
 
+    _log_open_hdf5("radclss main process after radar column extraction")
+
     # Assemble individual columns into single DataSet
     # try:
     # Concatenate all extracted columns across time dimension to form daily timeseries
@@ -324,6 +331,8 @@ def radclss(
         )
     else:
         nexrad_columns = None
+
+    _log_open_hdf5("radclss main process after NEXRAD extraction")
 
     if verbose:
         print("\n" + "=" * 80)
