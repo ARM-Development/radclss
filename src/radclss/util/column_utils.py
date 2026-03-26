@@ -1,5 +1,4 @@
 import boto3
-import h5py
 import pyart
 import act
 import numpy as np
@@ -24,23 +23,6 @@ def _read_sonde_cached(path, exclude):
         _sonde_cache[path] = raw.compute()
         raw.close()
     return _sonde_cache[path]
-
-
-def _log_open_hdf5(label=""):
-    """Log all currently open HDF5 file handles via h5py's low-level API."""
-    try:
-        fids = h5py.h5f.get_obj_ids(types=h5py.h5f.OBJ_FILE)
-        logging.warning("%s: %d open HDF5 handle(s)", label, len(fids))
-        for fid in fids:
-            try:
-                name = h5py.h5f.get_name(fid)
-                logging.warning(
-                    "  %s", name.decode() if isinstance(name, bytes) else name
-                )
-            except Exception:
-                logging.warning("  <handle id=%s>", fid)
-    except Exception as exc:
-        logging.warning("HDF5 diagnostic unavailable: %s", exc)
 
 
 def get_nexrad_column(
@@ -150,7 +132,6 @@ def get_nexrad_column(
             column_list.append(da)
     finally:
         del radar_obj
-        _log_open_hdf5("get_nexrad_column after del radar_obj")
 
     # Concatenate the extracted radar columns for this scan across all sites
     ds = xr.concat([data for data in column_list if data], dim="station")
@@ -220,6 +201,10 @@ def subset_points(
         return ds
 
     try:
+        # Check for RHI and reduce to first sweep if > 1 sweep
+        if "rhi" in radar.scan_type:
+            radar = radar.extract_sweeps([0])
+
         # Check for single sweep scans
         if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
             radar.sweep_start_ray_index["data"] = np.ma.array([0])
@@ -314,7 +299,6 @@ def subset_points(
             del column_list, da
     finally:
         del radar
-        _log_open_hdf5("subset_points after del radar")
     return ds
 
 

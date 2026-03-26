@@ -10,7 +10,6 @@ from concurrent.futures import as_completed as futures_as_completed
 from ..util.column_utils import (
     subset_points,
     get_nexrad_column,
-    _log_open_hdf5,
     _prepare_match,
     _apply_match,
 )
@@ -217,7 +216,6 @@ def radclss(
                         f"  Finished {k}: {successful}/{len(columns[k])} successful extractions"
                     )
 
-    _log_open_hdf5("radclss main process after radar column extraction")
 
     # Assemble individual columns into single DataSet
     # try:
@@ -286,7 +284,7 @@ def radclss(
                     input_site_dict,
                     nexrad_radar=nexrad_site,
                 )
-
+                 
             results = current_client.map(_get_nexrad_wrapper, time_list)
 
             successful_count = 0
@@ -314,26 +312,30 @@ def radclss(
         else:
             if verbose:
                 print(f"  Fetching {len(time_list)} NEXRAD columns via thread pool...")
-            with ThreadPoolExecutor() as pool:
-                futs = {
-                    pool.submit(
-                        get_nexrad_column,
-                        t,
-                        output_config["site"],
-                        input_site_dict,
-                        nexrad_site,
-                    ): t
-                    for t in time_list
-                }
-                for fut in futures_as_completed(futs):
-                    try:
-                        result = fut.result()
-                        if result is not None:
-                            nexrad_columns.append(result)
-                    except Exception as exc:
-                        logging.warning(
-                            "NEXRAD fetch failed for %s: %s", futs[fut], exc
+            def _get_nexrad_wrapper(time_str):
+                return get_nexrad_column(
+                    time_str,
+                    output_config["site"],
+                    input_site_dict,
+                    nexrad_radar=nexrad_site,
+                )
+            successful_count = 0
+            failed_count = 0
+            for t in time_list:
+                try:
+                    nexrad_columns.append(_get_nexrad_wrapper(t))
+                    successful_count += 1
+                    if verbose and successful_count % 5 == 0:
+                        print(
+                            f"  Completed {successful_count}/{len(time_list)} NEXRAD columns..."
                         )
+                except Exception as error:
+                    failed_count += 1
+                    if verbose:
+                        print(
+                            f"  ERROR fetching NEXRAD data (total failures: {failed_count})"
+                        )
+                    logging.exception(error)
 
         if verbose:
             valid_nexrad = sum(1 for x in nexrad_columns if x is not None)
@@ -345,7 +347,6 @@ def radclss(
     else:
         nexrad_columns = None
 
-    _log_open_hdf5("radclss main process after NEXRAD extraction")
 
     if verbose:
         print("\n" + "=" * 80)
@@ -631,15 +632,6 @@ def radclss(
     if verbose:
         print("\n  Freeing memory: deleting intermediate datasets...")
     ds_concat.close()
-    if serial is not True:
-        if current_client is None:
-            try:
-                current_client = Client.current()
-            except ValueError:
-                raise RuntimeError(
-                    "No Dask client found. Please start a Dask client before running in parallel mode."
-                )
-        current_client.restart()
     del ds_concat
 
     # Free up Memory
