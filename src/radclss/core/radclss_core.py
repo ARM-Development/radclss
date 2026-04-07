@@ -4,6 +4,8 @@ import xarray as xr
 import act
 import numpy as np
 import pandas as pd
+import os
+
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed as futures_as_completed
 
@@ -130,6 +132,7 @@ def radclss(
         )
     # Call Subset Points
     columns = {}
+    datastream_names = {}
     if verbose:
         print("\n" + "=" * 80)
         print("STEP 1: Extracting radar columns")
@@ -153,7 +156,7 @@ def radclss(
                 results = current_client.map(
                     subset_points,
                     volumes[k],
-                    sonde=volumes["sonde"],
+                    sonde=None,
                     input_site_dict=input_site_dict,
                     height_bins=height_bins,
                     rad_key=k,
@@ -175,7 +178,7 @@ def radclss(
                             print(
                                 f"  ERROR processing file (total failures: {failed_count})"
                             )
-
+                datastream_names[k] = columns[k][-1].attrs["datastream"]
                 if verbose:
                     print(
                         f"  Finished {k}: {successful_count} successful, {failed_count} failed"
@@ -194,14 +197,17 @@ def radclss(
                         print(
                             f"  [{file_count}/{len(volumes[k])}] Processing: {rad.split('/')[-1]}"
                         )
-                    result = subset_points(
-                        rad,
-                        sonde=volumes["sonde"],
-                        input_site_dict=input_site_dict,
-                        height_bins=height_bins,
-                        rad_key=k,
-                    )
-                    columns[k].append(result)
+                    try:
+                        result = subset_points(
+                            rad,
+                            sonde=None,
+                            input_site_dict=input_site_dict,
+                            height_bins=height_bins,
+                            rad_key=k,
+                        )
+                        columns[k].append(result)
+                    except Exception as e:
+                        result = None
                     if verbose:
                         if result is not None:
                             print(
@@ -634,8 +640,10 @@ def radclss(
     ds_concat.close()
     del ds_concat
 
-    # Free up Memory
     del columns
+    if verbose and serial is False:
+        print("\n  Restarting dask client.")
+        current_client.restart()
 
     # If successful column extraction, apply in-situ
     if ds:
@@ -654,8 +662,6 @@ def radclss(
         _instrument_tasks = []
         vol_keys = list(volumes.keys())
         for k in vol_keys:
-            if k == "sonde":
-                continue
             if len(volumes[k]) == 0:
                 if verbose:
                     print(f"No files found for instrument/site: {k}")
@@ -757,32 +763,34 @@ def radclss(
                             column_time=ds.time,
                             column_height=ds["height"],
                             resample="mean",
+                            prefix="wxt_",
+                        ),
+                    )
+                )
+            elif instrument == "sonde":
+                _instrument_tasks.append(
+                    (
+                        k,
+                        site,
+                        dict(
+                            ground=volumes[k],
+                            site=site,
+                            discard=discard_var["sonde"],
+                            column_time=ds.time,
+                            column_height=ds["height"],
+                            resample="mean",
+                            prefix="sonde_",
                         ),
                     )
                 )
 
-        if verbose:
-            print(
-                f"  Loading {len(_instrument_tasks)} ground instrument file(s) in parallel..."
-            )
-
-        # Parallel I/O + resample — each task reads its own files independently
-        with ThreadPoolExecutor() as pool:
-            _futs = {
-                pool.submit(_prepare_match, **kwargs): (k, site)
-                for k, site, kwargs in _instrument_tasks
-            }
-
-        # Sequential apply — in-place writes to ds must not overlap
-        for fut, (k, site) in _futs.items():
-            try:
-                _, matched = fut.result()
+        results = []
+        for k, site, kwargs in _instrument_tasks:
+            _, matched = _prepare_match(**kwargs)
+            if matched is not None:
                 ds = _apply_match(ds, site, matched)
-                if verbose:
-                    print(f"  Matched {k} for site {site}")
-            except Exception as exc:
-                logging.warning("Failed to match %s for site %s: %s", k, site, exc)
-
+                datastream_names[k] = matched.attrs["datastream"]
+        
     else:
         # There is no column extraction
         raise RuntimeError(": RadCLss FAILURE (All Columns Failed to Extract): ")
@@ -796,6 +804,14 @@ def radclss(
     del ds["base_time"].attrs["units"]
     del ds["time_offset"].attrs["units"]
     del ds["time"].attrs["units"]
+    
+    if verbose:
+        print(" Adding input datastream names to dataset attributes...")
+        for k, v in datastream_names.items():
+            ds_type = k.split("_")[0]
+            for var in ds.data_vars:
+                if var.startswith(ds_type):
+                    ds[var].attrs["input_datastream"] = v
 
     if verbose:
         print("\n" + "=" * 80)

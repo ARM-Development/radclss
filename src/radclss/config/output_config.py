@@ -1,7 +1,7 @@
 OUTPUT_SITE = "BNF"
 OUTPUT_FACILITY = "M1"
 OUTPUT_PLATFORM = "radclss"
-OUTPUT_LEVEL = "c2"
+OUTPUT_LEVEL = "c0"
 OUTPUT_GATE_TIME_ATTRS = {
     "long_name": (
         "Time in Seconds that Cooresponds to the Start"

@@ -3,6 +3,7 @@ import pyart
 import act
 import numpy as np
 import xarray as xr
+import pandas as pd
 import datetime
 import logging
 
@@ -14,6 +15,7 @@ from ..config import DEFAULT_DISCARD_VAR, DEFAULT_NEXRAD_RADARS
 from ..config import get_output_config
 
 _sonde_cache = {}
+_nexrad_cache = {}
 
 
 def _read_sonde_cached(path, exclude):
@@ -24,6 +26,15 @@ def _read_sonde_cached(path, exclude):
         raw.close()
     return _sonde_cache[path]
 
+def _read_nexrad_cache(path):
+    if path not in _nexrad_cache.keys():
+        raw = pyart.io.read_nexrad_archive(path)
+        _nexrad_cache[path] = raw
+        # Only maintain 5 files in the cache to save memory
+        if len(_nexrad_cache.keys()) > 5:
+            first_key = next(iter(_nexrad_cache))
+            del _nexrad_cache[first_key]
+    return _nexrad_cache[path]
 
 def get_nexrad_column(
     rad_time,
@@ -105,7 +116,7 @@ def get_nexrad_column(
 
     time_list = np.array(time_list)
     path = f"s3://{bucket_name}/" + file_list[np.argmin(np.abs(time_list - right_now))]
-    radar_obj = pyart.io.read_nexrad_archive(path)
+    radar_obj = _read_nexrad_cache(path)
     try:
         column_list = []
         for lat, lon in zip(lats, lons):
@@ -136,6 +147,7 @@ def get_nexrad_column(
     # Concatenate the extracted radar columns for this scan across all sites
     ds = xr.concat([data for data in column_list if data], dim="station")
     ds = _add_station_vars(ds, sites, site_alt)
+    ds.attrs["nexrad_radar"] = nexrad_radar
 
     del column_list, da
     return ds
@@ -204,7 +216,7 @@ def subset_points(
         # Check for RHI and reduce to first sweep if > 1 sweep
         if "rhi" in radar.scan_type:
             radar = radar.extract_sweeps([0])
-
+            
         # Check for single sweep scans
         if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
             radar.sweep_start_ray_index["data"] = np.ma.array([0])
@@ -236,7 +248,7 @@ def subset_points(
                 start_diff = [radar_start - sonde for sonde in sonde_start]
 
                 # merge the sonde file into the radar object (cached across radar files)
-                sonde_path = sonde[start_diff.index(min(start_diff))]
+                sonde_path = sonde[start_diff.index(min(abs(start_diff)))]
                 ds_sonde = _read_sonde_cached(sonde_path, exclude_sonde)
 
                 # create list of variables within sonde dataset to add to the radar file
@@ -258,7 +270,7 @@ def subset_points(
                     radar.fields["sonde_" + var]["standard_name"] = sonde_dict[
                         "standard_name"
                     ]
-                    radar.fields["sonde_" + var]["datastream"] = ds_sonde.datastream
+                    radar.fields["sonde_" + var]["input_datastream"] = ds_sonde.datastream
 
                 del radar_start, sonde_start, ds_sonde
                 del z_dict, sonde_dict
@@ -267,25 +279,50 @@ def subset_points(
             for lat, lon in zip(lats, lons):
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
-
-                da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
+                if not "rhi" in radar.scan_type:
+                    da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
+                else:
+                    try:
+                        da = pyart.util.get_field_location(radar, lat, lon)
+                    except ValueError:
+                        # If the columnsect fails, try adding 180 to the azimuths to account for potential mislabeling of radar location
+                        radar.azimuth["data"] = radar.azimuth["data"] + 180
+                        # Need to adjust elevation as well to maintain the same relative geometry between radar and column locations
+                        radar.elevation["data"] = 180 - radar.elevation["data"]
+                        try:
+                            da = pyart.util.get_field_location(radar, lat, lon)
+                        except ValueError:
+                            # NaNs will be returned if the columnsect fails again after adjusting the azimuths
+                            da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
+                            
+                    time_offset = da["time_offset"]
                 # check for valid heights
                 valid = np.isfinite(da["height"])
                 n_valid = int(valid.sum())
                 if n_valid > 0:
-                    da = (
-                        da.sel(height=valid).sortby("height").interp(height=height_bins)
-                    )
+                    try:
+                        da = (
+                            da.sel(height=valid).sortby("height").interp(height=height_bins)
+                        )
+                    except pd.errors.InvalidIndexError:
+                        da = da.drop_duplicates("height", keep="first")
+                        valid = np.isfinite(da["height"])
+                        da = (
+                            da.sel(height=valid).sortby("height").interp(height=height_bins)
+                        )
+                        time_offset = time_offset.drop_duplicates("height", keep="first")
                 else:
                     target_height = xr.DataArray(
                         height_bins, dims="height", name="height"
                     )
                     da = da.reindex(height=target_height)
+                if "rhi" in radar.scan_type:
+                    da["time_offset"] = time_offset
 
                 # Add the latitude and longitude of the extracted column
                 da["lat"], da["lon"] = lat, lon
                 # Convert timeoffsets to timedelta object and precision on datetime64
-                da.time_offset.data = da.time_offset.values.astype("timedelta64[s]")
+                da["time_offset"].data = da["time_offset"].values.astype("timedelta64[s]")
                 da.base_time.data = da.base_time.values.astype("datetime64[s]")
                 # Time is based off the start of the radar volume
                 da["gate_time"] = (
@@ -296,6 +333,7 @@ def subset_points(
             # Concatenate the extracted radar columns for this scan across all sites
             ds = xr.concat([data for data in column_list if data], dim="station")
             ds = _add_station_vars(ds, sites, site_alt)
+            ds.attrs["input_datastream"] = radar.metadata["datastream"]
             del column_list, da
     finally:
         del radar
@@ -323,17 +361,24 @@ def _prepare_match(
         grd_ds = ground
     else:
         _grd_raw = act.io.read_arm_netcdf(
-            ground, cleanup_qc=True, drop_variables=discard
+            ground, cleanup_qc=True, drop_variables=discard, parallel=False,
         )
-        grd_ds = _grd_raw.compute()
-        _grd_raw.close()
+        grd_ds = _grd_raw
         if prefix:
-            grd_ds = grd_ds.rename_vars({v: f"{prefix}{v}" for v in grd_ds.data_vars})
+            if prefix == "wxt_":
+                rename_dict = {v: f"{prefix}{v}" for v in grd_ds.data_vars if "wxt_" not in v}
+            else:
+                rename_dict = {v: f"{prefix}{v}" for v in grd_ds.data_vars}
+
+            grd_ds = grd_ds.rename_vars(rename_dict)
 
     if "base_time" in grd_ds.data_vars:
         del grd_ds["base_time"]
 
     if "height" in grd_ds.dims:
+        if grd_ds["height"].attrs["units"] == "km":
+            grd_ds["height"] = grd_ds["height"] * 1000
+            grd_ds["height"].attrs["units"] = "m"
         grd_ds = grd_ds.interp(height=column_height, method="linear")
 
     if "range" in grd_ds.dims:
@@ -376,7 +421,9 @@ def _prepare_match(
 
     for var in matched.data_vars:
         matched[var].attrs.update(source=matched.datastream)
-
+        matched[var].attrs["input_datastream"] = grd_ds.attrs["datastream"]
+    grd_ds.close()
+    _grd_raw.close()
     return site, matched
 
 
