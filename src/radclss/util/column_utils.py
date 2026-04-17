@@ -301,14 +301,17 @@ def subset_points(
                 n_valid = int(valid.sum())
                 if n_valid > 0:
                     try:
+                        # Drop all NaNs
+                        
                         da = (
-                            da.sel(height=valid).sortby("height").interp(height=height_bins)
+                            da.sel(height=valid).dropna("height").sortby("height").interp(height=height_bins)
                         )
                     except pd.errors.InvalidIndexError:
                         da = da.drop_duplicates("height", keep="first")
+                        
                         valid = np.isfinite(da["height"])
                         da = (
-                            da.sel(height=valid).sortby("height").interp(height=height_bins)
+                            da.sel(height=valid).dropna("height").sortby("height").interp(height=height_bins)
                         )
                         time_offset = time_offset.drop_duplicates("height", keep="first")
                 else:
