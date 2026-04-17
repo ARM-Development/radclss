@@ -126,7 +126,6 @@ def radclss(
         if verbose:
             print(f"Using {time_coords} as time basis")
             print(f"Number of {time_coords} files: {len(volumes[time_coords])}")
-    else:
     
     # Call Subset Points
     columns = {}
