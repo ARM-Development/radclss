@@ -127,9 +127,7 @@ def radclss(
             print(f"Using {time_coords} as time basis")
             print(f"Number of {time_coords} files: {len(volumes[time_coords])}")
     else:
-        raise NotImplementedError(
-            "Currently, only radar-based time coordinates are supported. Please specify a radar key from the volumes dictionary as the time_coords argument."
-        )
+    
     # Call Subset Points
     columns = {}
     datastream_names = {}
