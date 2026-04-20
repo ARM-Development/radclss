@@ -203,6 +203,7 @@ def radclss(
                             rad_key=k,
                         )
                         columns[k].append(result)
+                        
                     except Exception as e:
                         result = None
                     if verbose:
@@ -241,9 +242,20 @@ def radclss(
             if verbose:
                 print(f"  {k}: {len(columns[k])} columns")
                 print(f"    Time range: {min_times[k]} to {max_times[k]}")
-
+   
     min_time = min(np.array([x for x in min_times.values()]))
     max_time = max(np.array([x for x in max_times.values()]))
+    if not "radar" in time_coords and not _is_valid_offset(time_coords):
+        if verbose:
+            print(f"Loading timestamps from {time_coords}...")
+        time_ds = xr.open_dataset(volumes[time_coords][0])
+        ds_times = time_ds["time"].load().copy()
+        ds_times = ds_times.sel(time=slice(min_time, max_time))
+        min_time = min(ds_times.values)
+        max_time = max(ds_times.values)
+        time_ds.close()
+        if verbose:
+            print(f"   Time range: {min_time} to {max_time}")
 
     if verbose:
         print(f"\nOverall time range: {min_time} to {max_time}")
@@ -264,7 +276,15 @@ def radclss(
                     for x in columns[time_coords]
                 ]
             )
-
+        elif _is_valid_offset(time_coords):
+            time_list = pd.date_range(min_time, max_time, freq=time_coords).strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            time_list = sorted(
+                [
+                    str(x.dt.strftime("%Y-%m-%dT%H:%M:%S").values)
+                    for x in ds_times
+                ]
+            )
         if verbose:
             print(f"  Number of NEXRAD time steps to fetch: {len(time_list)}")
             print(f"  Time list: {time_list[0]} to {time_list[-1]}")
@@ -435,7 +455,7 @@ def radclss(
             ds_concat[k] = ds_concat[k].reindex(
                 time=nexrad_columns["time"], method="nearest"
             )
-    else:
+    elif _is_valid_offset(time_coords):
         if verbose:
             print(f"  Resampling to {time_coords} intervals")
         for k in ds_concat.keys():
@@ -444,13 +464,18 @@ def radclss(
             nexrad_columns = nexrad_columns.resample(time=time_coords)
 
         # Then, reindex to the largest of the time arrays
-        new_coordinates = pd.date_range(min_time, max_time, time_coords)
+        new_coordinates = pd.date_range(min_time, max_time, freq=time_coords)
         if verbose:
             print(f"    Creating new time grid: {len(new_coordinates)} time steps")
         for k in ds_concat.keys():
             ds_concat[k] = ds_concat[k].reindex(time=new_coordinates)
         if nexrad:
             nexrad_columns = nexrad_columns.reindex(time=new_coordinates)
+    else:
+        for k in ds_concat.keys():
+            ds_concat[k] = ds_concat[k].reindex(time=ds_times, method="nearest")
+        if nexrad:
+            nexrad_columns = nexrad_columns.reindex(time=ds_times, method="nearest")
 
     # Rename all variables according to their radar name
     if verbose:
@@ -824,3 +849,10 @@ def radclss(
         print("=" * 80)
 
     return ds
+
+def _is_valid_offset(s: str) -> bool:
+    try:
+        return pd.tseries.frequencies.to_offset(s) is not None
+    except ValueError:
+        return False
+

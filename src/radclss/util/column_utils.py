@@ -6,6 +6,7 @@ import xarray as xr
 import pandas as pd
 import datetime
 import logging
+import traceback
 
 from datetime import timedelta
 from botocore.config import Config
@@ -30,11 +31,100 @@ def _read_nexrad_cache(path):
     if path not in _nexrad_cache.keys():
         raw = pyart.io.read_nexrad_archive(path)
         _nexrad_cache[path] = raw
-        # Only maintain 5 files in the cache to save memory
-        if len(_nexrad_cache.keys()) > 5:
+        # Only maintain 15 files in the cache to save memory
+        if len(_nexrad_cache.keys()) > 15:
             first_key = next(iter(_nexrad_cache))
             del _nexrad_cache[first_key]
     return _nexrad_cache[path]
+
+def _grab_90_degree_rays(radar):
+    """ Special case for column right over the radar in an RHI"""
+    # Get the rays within 0.5 degrees of 90 degrees
+    ray = np.argmin(radar.elevation["data"] - 90.)
+    moment = {key: [] for key in radar.fields.keys()}
+    # Determine the center of each gate for the subsetted rays.
+    rhi_z = radar.range["data"]
+        
+    for key in moment:
+        moment[key] = radar.fields[key]["data"][ray, :].squeeze()
+    # Add radar elevation to height gates
+    # to define height as center of each gate above sea level
+    zgate = rhi_z + radar.altitude["data"][0]
+    # Determine the time at the center of each ray within the column
+    # Define the start of the radar volume as a numpy datetime object for xr
+    base_time = np.datetime64(pyart.util.datetime_from_radar(radar).isoformat(), "ns")
+    # Convert Py-ART radar object time (time since volume start) to time delta
+    # Add to base time to have sequential time within the xr Dataset
+    # for easier future merging/work
+    combined_time = pd.to_timedelta(radar.time["data"][ray], unit="s")
+    total_time = base_time + combined_time
+
+    # Create a blank list to hold the xarray DataArrays
+    ds_container = []
+    da_meta = [
+        "units",
+        "standard_name",
+        "long_name",
+        "valid_max",
+        "valid_min",
+        "coordinates",
+    ]
+    # Convert the moment dictionary to xarray DataArray.
+    # Apply radar object meta data to DataArray attribute
+    for key in moment:
+        if key != "height":
+            da = xr.DataArray(
+                moment[key], 
+                coords=dict(height=zgate), name=key, dims=["height"]
+            )
+            for tag in da_meta:
+                if tag in radar.fields[key]:
+                    da.attrs[tag] = radar.fields[key][tag]
+            # Append to ds container
+            ds_container.append(da.to_dataset(name=key))
+
+    # Add additional DataArrays 'base_time' and 'time_offset'
+    # if not present within the radar object.
+    da_base = xr.DataArray(base_time, name="base_time")
+    da_offset = xr.DataArray(
+        combined_time, coords=dict(height=zgate), name="time_offset", dims=["height"]
+    )
+    ds_container.append(da_base.to_dataset(name="base_time"))
+    ds_container.append(da_offset.to_dataset(name="time_offset"))
+
+    # Create a xarray DataSet from the DataArrays
+    column = xr.merge(ds_container)
+
+    # Assign Attributes for the Height and Times
+    height_des = (
+        "Height Above Sea Level [in meters] for the Center of Each"
+        + " Radar Gate Above the Target Location"
+    )
+    column.height.attrs.update(
+        long_name="Height of Radar Beam",
+        units="m",
+        standard_name="height",
+        description=height_des,
+    )
+
+    column.base_time.attrs.update(long_name="UTC Reference Time", units="seconds")
+
+    time_long = "Time in Seconds Since Volume Start"
+    time_des = (
+        "Time in Seconds Since Volume Start that Cooresponds"
+        + " to the Center of Each Height Gate"
+        + " Above the Target Location"
+    )
+    column.time_offset.attrs.update(
+        long_name=time_long, units="seconds", description=time_des
+    )
+
+    # Assign Global Attributes to the DataSet
+    column.attrs["distance_from_radar"] = "0 km"
+    column.attrs["azimuth"] = "0 degrees"
+    column.attrs["latitude_of_location"] = str(radar.latitude["data"][0]) + " degrees"
+    column.attrs["longitude_of_location"] = str(radar.longitude["data"][0]) + " degrees"
+    return column
 
 def get_nexrad_column(
     rad_time,
@@ -124,11 +214,12 @@ def get_nexrad_column(
             # NOTE: interpolating throughout Troposphere to match sonde to in the future
 
             da = pyart.util.columnsect.column_vertical_profile(radar_obj, lat, lon)
+            da = da.sortby("height")
             # check for valid heights
             valid = np.isfinite(da["height"])
             n_valid = int(valid.sum())
             if n_valid > 0:
-                da = da.sel(height=valid).sortby("height").interp(height=height_bins)
+                da = da.sortby("height").interp(height=height_bins)
             else:
                 target_height = xr.DataArray(height_bins, dims="height", name="height")
                 da = da.reindex(height=target_height)
@@ -201,7 +292,7 @@ def subset_points(
     lats = list([x[0] for x in input_site_dict.values()])
     lons = list([x[1] for x in input_site_dict.values()])
     site_alt = list([x[2] for x in input_site_dict.values()])
-
+    
     sites = list(input_site_dict.keys())
     try:
         radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR[rad_key])
@@ -276,9 +367,10 @@ def subset_points(
                 del z_dict, sonde_dict
 
             column_list = []
-            for lat, lon in zip(lats, lons):
+            for lat, lon, site in zip(lats, lons, sites):
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
+                
                 if not "rhi" in radar.scan_type:
                     da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
                 else:
@@ -286,32 +378,43 @@ def subset_points(
                         da = pyart.util.get_field_location(radar, lat, lon)
                     except ValueError:
                         # If the columnsect fails, try adding 180 to the azimuths to account for potential mislabeling of radar location
-                        radar.azimuth["data"] = radar.azimuth["data"] + 180
-                        # Need to adjust elevation as well to maintain the same relative geometry between radar and column locations
-                        radar.elevation["data"] = 180 - radar.elevation["data"]
+                        if np.all(radar.azimuth["data"] < 180):
+                            radar.azimuth["data"] = radar.azimuth["data"] + 180
+                            # Need to adjust elevation as well to maintain the same relative geometry between radar and column locations
+                            radar.elevation["data"] = 180 - radar.elevation["data"]
                         try:
                             da = pyart.util.get_field_location(radar, lat, lon)
-                        except ValueError:
-                            # NaNs will be returned if the columnsect fails again after adjusting the azimuths
-                            da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
+                        except ValueError as e:
+                            # Grab the vertically pointing ray(s) if the radar site == site
+                            if radar.metadata["facility_id"] == site:
+                                try:
+                                    da = _grab_90_degree_rays(radar)
+                                except Exception as e:
+                                    logging.warning(
+                                        f"Failed to grab 90 degree rays for {site} from {nfile}."
+                                        + "NaNs will be returned for this column."
+                                    )
+                            else:
+                                # NaNs will be returned if the columnsect fails again after adjusting the azimuths
+                                da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
                             
                     time_offset = da["time_offset"]
                 # check for valid heights
+                da = da.sortby("height")
                 valid = np.isfinite(da["height"])
                 n_valid = int(valid.sum())
                 if n_valid > 0:
                     try:
                         # Drop all NaNs
-                        
                         da = (
-                            da.sel(height=valid).dropna("height").sortby("height").interp(height=height_bins)
+                            da.dropna("height").sortby("height").interp(height=height_bins)
                         )
                     except pd.errors.InvalidIndexError:
                         da = da.drop_duplicates("height", keep="first")
                         
                         valid = np.isfinite(da["height"])
                         da = (
-                            da.sel(height=valid).dropna("height").sortby("height").interp(height=height_bins)
+                            da.dropna("height").sortby("height").interp(height=height_bins)
                         )
                         time_offset = time_offset.drop_duplicates("height", keep="first")
                 else:
