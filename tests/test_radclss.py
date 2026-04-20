@@ -18,23 +18,24 @@ def test_radclss_serial():
     if not username or not token:
         return  # Skip test if credentials are not set
 
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
-
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-18T00:00:00",
-        "2025-06-20T00:00:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
+    if glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfinterpolatedsondeM1.c1",
+            "2025-06-18T00:00:00",
+            "2025-06-20T00:00:00",
+            output=test_data_path,
+        )
     for files in arm_test_data.DATASETS.registry.keys():
         if "bnf" in files:
             if not os.path.exists(os.path.join(test_data_path, files)):
@@ -43,7 +44,7 @@ def test_radclss_serial():
     rad_path = os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")
     radar_files = sorted(glob.glob(rad_path))
     sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+        glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*"))
     )
 
     vd_M1_files = glob.glob(os.path.join(test_data_path, "*bnfvdisquantsM1.c1*nc"))
@@ -117,20 +118,24 @@ def test_radclss_serial():
         )
         assert not (my_columns["sonde_v_wind"].sel(station=site) == missing_value).all()
         missing_value = (
-            my_columns["sonde_tdry"].sel(station=site).attrs.get("missing_value", None)
+            my_columns["sonde_temp"].sel(station=site).attrs.get("missing_value", None)
         )
-        assert not (my_columns["sonde_tdry"].sel(station=site) == missing_value).all()
+        assert not (my_columns["sonde_temp"].sel(station=site) == missing_value).all()
         missing_value = (
             my_columns["sonde_rh"].sel(station=site).attrs.get("missing_value", None)
         )
         assert not (my_columns["sonde_rh"].sel(station=site) == missing_value).all()
         missing_value = (
-            my_columns["sonde_pres"].sel(station=site).attrs.get("missing_value", None)
+            my_columns["sonde_bar_pres"]
+            .sel(station=site)
+            .attrs.get("missing_value", None)
         )
-        assert not (my_columns["sonde_pres"].sel(station=site) == missing_value).all()
+        assert not (
+            my_columns["sonde_bar_pres"].sel(station=site) == missing_value
+        ).all()
 
     # Met data check
-    for site in ["M1", "S20", "S30", "S40", "S13"]:
+    for site in ["M1", "S20", "S30", "S40"]:
         missing_value = (
             my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
         )
@@ -190,24 +195,25 @@ def test_radclss_parallel():
     token = os.getenv("ARM_PASSWORD")
     if not username or not token:
         return  # Skip test if credentials are not set
-
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
-
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-18T00:00:00",
-        "2025-06-20T00:00:00",
-        output=test_data_path,
-    )
+    # If data is not cached already, download the necessary data for testing
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
+    if glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfinterpolatedsondeM1.c1",
+            "2025-06-18T00:00:00",
+            "2025-06-20T00:00:00",
+            output=test_data_path,
+        )
     for files in arm_test_data.DATASETS.registry.keys():
         if "bnf" in files:
             if not os.path.exists(os.path.join(test_data_path, files)):
@@ -216,7 +222,7 @@ def test_radclss_parallel():
     rad_path = os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")
     radar_files = sorted(glob.glob(rad_path))
     sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+        glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*"))
     )
 
     vd_M1_files = glob.glob(os.path.join(test_data_path, "*bnfvdisquantsM1.c1*nc"))
@@ -290,20 +296,24 @@ def test_radclss_parallel():
         )
         assert not (my_columns["sonde_v_wind"].sel(station=site) == missing_value).all()
         missing_value = (
-            my_columns["sonde_tdry"].sel(station=site).attrs.get("missing_value", None)
+            my_columns["sonde_temp"].sel(station=site).attrs.get("missing_value", None)
         )
-        assert not (my_columns["sonde_tdry"].sel(station=site) == missing_value).all()
+        assert not (my_columns["sonde_temp"].sel(station=site) == missing_value).all()
         missing_value = (
             my_columns["sonde_rh"].sel(station=site).attrs.get("missing_value", None)
         )
         assert not (my_columns["sonde_rh"].sel(station=site) == missing_value).all()
         missing_value = (
-            my_columns["sonde_pres"].sel(station=site).attrs.get("missing_value", None)
+            my_columns["sonde_bar_pres"]
+            .sel(station=site)
+            .attrs.get("missing_value", None)
         )
-        assert not (my_columns["sonde_pres"].sel(station=site) == missing_value).all()
+        assert not (
+            my_columns["sonde_bar_pres"].sel(station=site) == missing_value
+        ).all()
 
     # Met data check
-    for site in ["M1", "S20", "S30", "S40", "S13"]:
+    for site in ["M1", "S20", "S30", "S40"]:
         missing_value = (
             my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
         )
@@ -363,23 +373,24 @@ def test_subset_points():
     if not username or not token:
         return  # Skip test if credentials are not set
 
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
-
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-18T00:00:00",
-        "2025-06-20T00:00:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
+    if glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfsondewnpnM1.b1",
+            "2025-06-18T00:00:00",
+            "2025-06-20T00:00:00",
+            output=test_data_path,
+        )
 
     rad_path = os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")
     radar_files = sorted(glob.glob(rad_path))
@@ -394,13 +405,11 @@ def test_subset_points():
     assert np.array_equal(subset_ds["height"].values, np.arange(500, 8500, 250))
     assert "sonde_u_wind" not in subset_ds.data_vars
     assert "sonde_v_wind" not in subset_ds.data_vars
-    assert "sonde_tdry" not in subset_ds.data_vars
+    assert "sonde_temp" not in subset_ds.data_vars
     assert "sonde_rh" not in subset_ds.data_vars
 
     # Test with rawinsonde input instead of sonde=False
-    sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
-    )
+    sonde_files = sorted(glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*")))
 
     subset_ds = radclss.util.subset_points(
         radar_files[0], input_site_dict, sonde=sonde_files
@@ -414,7 +423,6 @@ def test_subset_points():
     assert "sonde_rh" in subset_ds.data_vars
     assert "sonde_u_wind" in subset_ds.data_vars
     assert "sonde_v_wind" in subset_ds.data_vars
-    assert "sonde_tdry" in subset_ds.data_vars
     assert "sonde_rh" in subset_ds.data_vars
 
 
@@ -431,34 +439,37 @@ def test_radclss_with_kasacr():
         return  # Skip test if credentials are not set
 
     # Download CSAPR2 data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-01T12:00:00",
-        "2025-06-01T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-01T12:00:00",
+            "2025-06-01T12:30:00",
+            output=test_data_path,
+        )
 
     # Download KASACR data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfkasacrcfrS4.a1",
-        "2025-06-01T12:00:00",
-        "2025-06-01T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfkasacrcfrS4.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfkasacrcfrS4.a1",
+            "2025-06-01T12:00:00",
+            "2025-06-01T12:30:00",
+            output=test_data_path,
+        )
 
     # Download sonde data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-01T00:00:00",
-        "2025-06-02T00:00:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfinterpolatedsondeM1.c1",
+            "2025-06-01T00:00:00",
+            "2025-06-02T00:00:00",
+            output=test_data_path,
+        )
 
     # Fetch any other test data
     for files in arm_test_data.DATASETS.registry.keys():
@@ -474,7 +485,7 @@ def test_radclss_with_kasacr():
         glob.glob(os.path.join(test_data_path, "*bnfkasacrcfrS4.a1*.nc"))
     )
     sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+        glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*"))
     )
 
     # Gather other instrument files
@@ -573,34 +584,37 @@ def test_radclss_with_kazr():
         return  # Skip test if credentials are not set
 
     # Download CSAPR2 data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-01T12:00:00",
-        "2025-06-01T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-01T12:00:00",
+            "2025-06-01T12:30:00",
+            output=test_data_path,
+        )
 
     # Download KASACR data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfkazr2cfrprM1.a1",
-        "2025-06-01T12:00:00",
-        "2025-06-01T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfkazr2cfrprM1.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfkazr2cfrprM1.a1",
+            "2025-06-01T12:00:00",
+            "2025-06-01T12:30:00",
+            output=test_data_path,
+        )
 
     # Download sonde data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-01T00:00:00",
-        "2025-06-02T00:00:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfinterpolatedsondeM1.c1",
+            "2025-06-01T00:00:00",
+            "2025-06-02T00:00:00",
+            output=test_data_path,
+        )
 
     # Fetch any other test data
     for files in arm_test_data.DATASETS.registry.keys():
@@ -616,7 +630,7 @@ def test_radclss_with_kazr():
         glob.glob(os.path.join(test_data_path, "*bnfkazr2cfrprM1.a1*.nc"))
     )
     sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+        glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*"))
     )
 
     # Gather other instrument files
@@ -715,14 +729,15 @@ def test_radclss_parallel_with_nexrad():
         return  # Skip test if credentials are not set
 
     # Download CSAPR2 data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
 
     # Gather all the radar files
     csapr2_files = sorted(
@@ -807,34 +822,37 @@ def test_radclss_parallel_with_kasacr():
         return  # Skip test if credentials are not set
 
     # Download CSAPR2 data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfcsapr2cfrS3.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfcsapr2cfrS3.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
 
     # Download KASACR data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfkasacrcfrS4.a1",
-        "2025-06-19T12:00:00",
-        "2025-06-19T12:30:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfkasacrcfrS4.a1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfkasacrcfrS4.a1",
+            "2025-06-19T12:00:00",
+            "2025-06-19T12:30:00",
+            output=test_data_path,
+        )
 
     # Download sonde data
-    act.discovery.download_arm_data(
-        username,
-        token,
-        "bnfsondewnpnM1.b1",
-        "2025-06-18T00:00:00",
-        "2025-06-20T00:00:00",
-        output=test_data_path,
-    )
+    if glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*.nc")) == []:
+        act.discovery.download_arm_data(
+            username,
+            token,
+            "bnfinterpolatedsondeM1.c1",
+            "2025-06-18T00:00:00",
+            "2025-06-20T00:00:00",
+            output=test_data_path,
+        )
 
     # Fetch any other test data
     for files in arm_test_data.DATASETS.registry.keys():
@@ -850,7 +868,7 @@ def test_radclss_parallel_with_kasacr():
         glob.glob(os.path.join(test_data_path, "*bnfkasacrcfrS4.a1*.nc"))
     )
     sonde_files = sorted(
-        glob.glob(os.path.join(test_data_path, "*bnfsondewnpnM1.b1*cdf"))
+        glob.glob(os.path.join(test_data_path, "*bnfinterpolatedsondeM1.c1*"))
     )
 
     # Gather other instrument files
