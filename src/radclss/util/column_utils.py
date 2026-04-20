@@ -6,7 +6,6 @@ import xarray as xr
 import pandas as pd
 import datetime
 import logging
-import traceback
 
 from datetime import timedelta
 from botocore.config import Config
@@ -27,6 +26,7 @@ def _read_sonde_cached(path, exclude):
         raw.close()
     return _sonde_cache[path]
 
+
 def _read_nexrad_cache(path):
     if path not in _nexrad_cache.keys():
         raw = pyart.io.read_nexrad_archive(path)
@@ -37,14 +37,15 @@ def _read_nexrad_cache(path):
             del _nexrad_cache[first_key]
     return _nexrad_cache[path]
 
+
 def _grab_90_degree_rays(radar):
-    """ Special case for column right over the radar in an RHI"""
+    """Special case for column right over the radar in an RHI"""
     # Get the rays within 0.5 degrees of 90 degrees
-    ray = np.argmin(radar.elevation["data"] - 90.)
+    ray = np.argmin(radar.elevation["data"] - 90.0)
     moment = {key: [] for key in radar.fields.keys()}
     # Determine the center of each gate for the subsetted rays.
     rhi_z = radar.range["data"]
-        
+
     for key in moment:
         moment[key] = radar.fields[key]["data"][ray, :].squeeze()
     # Add radar elevation to height gates
@@ -57,7 +58,6 @@ def _grab_90_degree_rays(radar):
     # Add to base time to have sequential time within the xr Dataset
     # for easier future merging/work
     combined_time = pd.to_timedelta(radar.time["data"][ray], unit="s")
-    total_time = base_time + combined_time
 
     # Create a blank list to hold the xarray DataArrays
     ds_container = []
@@ -74,8 +74,7 @@ def _grab_90_degree_rays(radar):
     for key in moment:
         if key != "height":
             da = xr.DataArray(
-                moment[key], 
-                coords=dict(height=zgate), name=key, dims=["height"]
+                moment[key], coords=dict(height=zgate), name=key, dims=["height"]
             )
             for tag in da_meta:
                 if tag in radar.fields[key]:
@@ -125,6 +124,7 @@ def _grab_90_degree_rays(radar):
     column.attrs["latitude_of_location"] = str(radar.latitude["data"][0]) + " degrees"
     column.attrs["longitude_of_location"] = str(radar.longitude["data"][0]) + " degrees"
     return column
+
 
 def get_nexrad_column(
     rad_time,
@@ -292,7 +292,7 @@ def subset_points(
     lats = list([x[0] for x in input_site_dict.values()])
     lons = list([x[1] for x in input_site_dict.values()])
     site_alt = list([x[2] for x in input_site_dict.values()])
-    
+
     sites = list(input_site_dict.keys())
     try:
         radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR[rad_key])
@@ -307,7 +307,7 @@ def subset_points(
         # Check for RHI and reduce to first sweep if > 1 sweep
         if "rhi" in radar.scan_type:
             radar = radar.extract_sweeps([0])
-            
+
         # Check for single sweep scans
         if np.ma.is_masked(radar.sweep_start_ray_index["data"][1:]):
             radar.sweep_start_ray_index["data"] = np.ma.array([0])
@@ -336,10 +336,10 @@ def subset_points(
                     for xfile in sonde
                 ]
                 # difference in time between radar file and each sonde file
-                start_diff = [radar_start - sonde for sonde in sonde_start]
+                start_diff = np.array([radar_start - sonde for sonde in sonde_start])
 
                 # merge the sonde file into the radar object (cached across radar files)
-                sonde_path = sonde[start_diff.index(min(abs(start_diff)))]
+                sonde_path = sonde[np.argmin(np.abs(start_diff))]
                 ds_sonde = _read_sonde_cached(sonde_path, exclude_sonde)
 
                 # create list of variables within sonde dataset to add to the radar file
@@ -361,7 +361,9 @@ def subset_points(
                     radar.fields["sonde_" + var]["standard_name"] = sonde_dict[
                         "standard_name"
                     ]
-                    radar.fields["sonde_" + var]["input_datastream"] = ds_sonde.datastream
+                    radar.fields["sonde_" + var][
+                        "input_datastream"
+                    ] = ds_sonde.datastream
 
                 del radar_start, sonde_start, ds_sonde
                 del z_dict, sonde_dict
@@ -370,8 +372,8 @@ def subset_points(
             for lat, lon, site in zip(lats, lons, sites):
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
-                
-                if not "rhi" in radar.scan_type:
+
+                if "rhi" not in radar.scan_type:
                     da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
                 else:
                     try:
@@ -384,20 +386,22 @@ def subset_points(
                             radar.elevation["data"] = 180 - radar.elevation["data"]
                         try:
                             da = pyart.util.get_field_location(radar, lat, lon)
-                        except ValueError as e:
+                        except ValueError:
                             # Grab the vertically pointing ray(s) if the radar site == site
                             if radar.metadata["facility_id"] == site:
                                 try:
                                     da = _grab_90_degree_rays(radar)
-                                except Exception as e:
+                                except Exception:
                                     logging.warning(
                                         f"Failed to grab 90 degree rays for {site} from {nfile}."
                                         + "NaNs will be returned for this column."
                                     )
                             else:
                                 # NaNs will be returned if the columnsect fails again after adjusting the azimuths
-                                da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)
-                            
+                                da = pyart.util.columnsect.column_vertical_profile(
+                                    radar, lat, lon
+                                )
+
                     time_offset = da["time_offset"]
                 # check for valid heights
                 da = da.sortby("height")
@@ -407,16 +411,22 @@ def subset_points(
                     try:
                         # Drop all NaNs
                         da = (
-                            da.dropna("height").sortby("height").interp(height=height_bins)
+                            da.dropna("height")
+                            .sortby("height")
+                            .interp(height=height_bins)
                         )
                     except pd.errors.InvalidIndexError:
                         da = da.drop_duplicates("height", keep="first")
-                        
+
                         valid = np.isfinite(da["height"])
                         da = (
-                            da.dropna("height").sortby("height").interp(height=height_bins)
+                            da.dropna("height")
+                            .sortby("height")
+                            .interp(height=height_bins)
                         )
-                        time_offset = time_offset.drop_duplicates("height", keep="first")
+                        time_offset = time_offset.drop_duplicates(
+                            "height", keep="first"
+                        )
                 else:
                     target_height = xr.DataArray(
                         height_bins, dims="height", name="height"
@@ -428,7 +438,9 @@ def subset_points(
                 # Add the latitude and longitude of the extracted column
                 da["lat"], da["lon"] = lat, lon
                 # Convert timeoffsets to timedelta object and precision on datetime64
-                da["time_offset"].data = da["time_offset"].values.astype("timedelta64[s]")
+                da["time_offset"].data = da["time_offset"].values.astype(
+                    "timedelta64[s]"
+                )
                 da.base_time.data = da.base_time.values.astype("datetime64[s]")
                 # Time is based off the start of the radar volume
                 da["gate_time"] = (
@@ -439,7 +451,7 @@ def subset_points(
             # Concatenate the extracted radar columns for this scan across all sites
             ds = xr.concat([data for data in column_list if data], dim="station")
             ds = _add_station_vars(ds, sites, site_alt)
-            ds.attrs["input_datastream"] = radar.metadata["datastream"]
+
             del column_list, da
     finally:
         del radar
@@ -467,12 +479,17 @@ def _prepare_match(
         grd_ds = ground
     else:
         _grd_raw = act.io.read_arm_netcdf(
-            ground, cleanup_qc=True, drop_variables=discard, parallel=False,
+            ground,
+            cleanup_qc=True,
+            drop_variables=discard,
+            parallel=False,
         )
         grd_ds = _grd_raw
         if prefix:
             if prefix == "wxt_":
-                rename_dict = {v: f"{prefix}{v}" for v in grd_ds.data_vars if "wxt_" not in v}
+                rename_dict = {
+                    v: f"{prefix}{v}" for v in grd_ds.data_vars if "wxt_" not in v
+                }
             else:
                 rename_dict = {v: f"{prefix}{v}" for v in grd_ds.data_vars}
 
@@ -527,7 +544,6 @@ def _prepare_match(
 
     for var in matched.data_vars:
         matched[var].attrs.update(source=matched.datastream)
-        matched[var].attrs["input_datastream"] = grd_ds.attrs["datastream"]
     grd_ds.close()
     _grd_raw.close()
     return site, matched

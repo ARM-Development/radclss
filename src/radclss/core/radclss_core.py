@@ -4,10 +4,7 @@ import xarray as xr
 import act
 import numpy as np
 import pandas as pd
-import os
 
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import as_completed as futures_as_completed
 
 from ..util.column_utils import (
     subset_points,
@@ -126,7 +123,7 @@ def radclss(
         if verbose:
             print(f"Using {time_coords} as time basis")
             print(f"Number of {time_coords} files: {len(volumes[time_coords])}")
-    
+
     # Call Subset Points
     columns = {}
     datastream_names = {}
@@ -175,7 +172,7 @@ def radclss(
                             print(
                                 f"  ERROR processing file (total failures: {failed_count})"
                             )
-                datastream_names[k] = columns[k][-1].attrs["datastream"]
+
                 if verbose:
                     print(
                         f"  Finished {k}: {successful_count} successful, {failed_count} failed"
@@ -203,8 +200,8 @@ def radclss(
                             rad_key=k,
                         )
                         columns[k].append(result)
-                        
-                    except Exception as e:
+
+                    except Exception:
                         result = None
                     if verbose:
                         if result is not None:
@@ -219,7 +216,6 @@ def radclss(
                     print(
                         f"  Finished {k}: {successful}/{len(columns[k])} successful extractions"
                     )
-
 
     # Assemble individual columns into single DataSet
     # try:
@@ -242,10 +238,10 @@ def radclss(
             if verbose:
                 print(f"  {k}: {len(columns[k])} columns")
                 print(f"    Time range: {min_times[k]} to {max_times[k]}")
-   
+
     min_time = min(np.array([x for x in min_times.values()]))
     max_time = max(np.array([x for x in max_times.values()]))
-    if not "radar" in time_coords and not _is_valid_offset(time_coords):
+    if "radar" not in time_coords and not _is_valid_offset(time_coords):
         if verbose:
             print(f"Loading timestamps from {time_coords}...")
         time_ds = xr.open_dataset(volumes[time_coords][0])
@@ -277,13 +273,12 @@ def radclss(
                 ]
             )
         elif _is_valid_offset(time_coords):
-            time_list = pd.date_range(min_time, max_time, freq=time_coords).strftime("%Y-%m-%dT%H:%M:%S")
+            time_list = pd.date_range(min_time, max_time, freq=time_coords).strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
         else:
             time_list = sorted(
-                [
-                    str(x.dt.strftime("%Y-%m-%dT%H:%M:%S").values)
-                    for x in ds_times
-                ]
+                [str(x.dt.strftime("%Y-%m-%dT%H:%M:%S").values) for x in ds_times]
             )
         if verbose:
             print(f"  Number of NEXRAD time steps to fetch: {len(time_list)}")
@@ -307,7 +302,7 @@ def radclss(
                     input_site_dict,
                     nexrad_radar=nexrad_site,
                 )
-                 
+
             results = current_client.map(_get_nexrad_wrapper, time_list)
 
             successful_count = 0
@@ -335,6 +330,7 @@ def radclss(
         else:
             if verbose:
                 print(f"  Fetching {len(time_list)} NEXRAD columns via thread pool...")
+
             def _get_nexrad_wrapper(time_str):
                 return get_nexrad_column(
                     time_str,
@@ -342,6 +338,7 @@ def radclss(
                     input_site_dict,
                     nexrad_radar=nexrad_site,
                 )
+
             successful_count = 0
             failed_count = 0
             for t in time_list:
@@ -369,7 +366,6 @@ def radclss(
         )
     else:
         nexrad_columns = None
-
 
     if verbose:
         print("\n" + "=" * 80)
@@ -684,6 +680,10 @@ def radclss(
         _instrument_tasks = []
         vol_keys = list(volumes.keys())
         for k in vol_keys:
+            if volumes[k] is None:
+                if verbose:
+                    print(f"No files provided for instrument/site: {k}")
+                continue
             if len(volumes[k]) == 0:
                 if verbose:
                     print(f"No files found for instrument/site: {k}")
@@ -811,8 +811,7 @@ def radclss(
             _, matched = _prepare_match(**kwargs)
             if matched is not None:
                 ds = _apply_match(ds, site, matched)
-                datastream_names[k] = matched.attrs["datastream"]
-        
+
     else:
         # There is no column extraction
         raise RuntimeError(": RadCLss FAILURE (All Columns Failed to Extract): ")
@@ -826,7 +825,7 @@ def radclss(
     del ds["base_time"].attrs["units"]
     del ds["time_offset"].attrs["units"]
     del ds["time"].attrs["units"]
-    
+
     if verbose:
         print(" Adding input datastream names to dataset attributes...")
         for k, v in datastream_names.items():
@@ -850,9 +849,9 @@ def radclss(
 
     return ds
 
+
 def _is_valid_offset(s: str) -> bool:
     try:
         return pd.tseries.frequencies.to_offset(s) is not None
     except ValueError:
         return False
-
