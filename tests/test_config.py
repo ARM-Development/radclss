@@ -45,14 +45,14 @@ def test_set_output_facility():
 
 
 def test_set_output_platform():
-    platform = "csapr2radclss"
+    platform = "radclss"
     radclss.config.set_output_platform(platform)
     config = radclss.config.get_output_config()
     assert config["platform"] == platform
 
 
 def test_set_output_level():
-    level = "c2"
+    level = "c0"
     radclss.config.set_output_level(level)
     config = radclss.config.get_output_config()
     assert config["level"] == level
@@ -93,8 +93,8 @@ def test_get_output_config():
     # Check default values
     assert config["site"] == "bnf"
     assert config["facility"] == "S3"
-    assert config["platform"] == "csapr2radclss"
-    assert config["level"] == "c2"
+    assert config["platform"] == "radclss"
+    assert config["level"] == "c0"
 
 
 def test_set_output_station_attrs():
