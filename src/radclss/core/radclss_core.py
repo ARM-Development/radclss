@@ -68,7 +68,7 @@ def radclss(
         subsetting columns in parallel. Default is True.
     dod_version : str, optional
         Option to supply a Data Object Description version to verify standards.
-        If this is an empty string, then the latest version will be used. Default is '1.2'.
+        If this is an empty string, then the latest version will be used. Default is '1.0'.
     discard_var : dict, optional
         Dictionary containing variables to drop from each datastream. Default is {}.
     verbose : bool, optional
