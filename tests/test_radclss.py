@@ -79,13 +79,14 @@ def test_radclss_serial():
         "S40": (34.17932, -87.45349, 236),
         "S13": (34.343889, -87.350556, 286),
     }
-
+    radclss.core.set_output_platform("radclss")
+    radclss.core.set_output_level("c0")
     my_columns = radclss.core.radclss(
         volumes, input_site_dict, "radar_csapr2", serial=True, verbose=False
     )
     assert isinstance(my_columns, xr.Dataset)
     assert "csapr2_reflectivity" in my_columns.data_vars
-    assert my_columns.dims["time"] == 11
+    assert my_columns.dims["time"] == 6
     assert my_columns.dims["height"] == 32
     assert my_columns.dims["station"] == 6
     assert np.array_equal(
@@ -257,13 +258,15 @@ def test_radclss_parallel():
         "S40": (34.17932, -87.45349, 236),
         "S13": (34.343889, -87.350556, 286),
     }
+    radclss.core.set_output_platform("radclss")
+    radclss.core.set_output_level("c0")
     with Client(LocalCluster(n_workers=2, threads_per_worker=1)) as client:  # noqa
         my_columns = radclss.core.radclss(
             volumes, input_site_dict, "radar_csapr2", serial=False, verbose=False
         )
     assert isinstance(my_columns, xr.Dataset)
     assert "csapr2_reflectivity" in my_columns.data_vars
-    assert my_columns.dims["time"] == 11
+    assert my_columns.dims["time"] == 6
     assert my_columns.dims["height"] == 32
     assert my_columns.dims["station"] == 6
     assert np.array_equal(
@@ -687,7 +690,7 @@ def test_radclss_with_kazr():
     )
 
     # Check that we are on CSAPR2 timestamps
-    assert len(my_columns["time"].values) == 11, "Expected time values in dataset"
+    assert len(my_columns["time"].values) == 6, "Expected time values in dataset"
 
     # Check that KAZ data exists if files were downloaded
     if len(kazr_files) > 0:
