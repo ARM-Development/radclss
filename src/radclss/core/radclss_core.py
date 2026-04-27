@@ -563,6 +563,7 @@ def radclss(
         print("Variables in merged dataset:")
         for vars in ds_concat.data_vars:
             print(vars)
+
     ds = act.io.create_ds_from_arm_dod(
         f"{output_platform}.{output_level}",
         {
