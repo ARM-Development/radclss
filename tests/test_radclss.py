@@ -79,8 +79,7 @@ def test_radclss_serial():
         "S40": (34.17932, -87.45349, 236),
         "S13": (34.343889, -87.350556, 286),
     }
-    radclss.core.set_output_platform("radclss")
-    radclss.core.set_output_level("c0")
+
     my_columns = radclss.core.radclss(
         volumes, input_site_dict, "radar_csapr2", serial=True, verbose=False
     )
@@ -258,8 +257,7 @@ def test_radclss_parallel():
         "S40": (34.17932, -87.45349, 236),
         "S13": (34.343889, -87.350556, 286),
     }
-    radclss.core.set_output_platform("radclss")
-    radclss.core.set_output_level("c0")
+
     with Client(LocalCluster(n_workers=2, threads_per_worker=1)) as client:  # noqa
         my_columns = radclss.core.radclss(
             volumes, input_site_dict, "radar_csapr2", serial=False, verbose=False
