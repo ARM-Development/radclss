@@ -32,7 +32,7 @@ def _read_nexrad_cache(path):
         raw = pyart.io.read_nexrad_archive(path)
         _nexrad_cache[path] = raw
         # Only maintain 15 files in the cache to save memory
-        if len(_nexrad_cache.keys()) > 15:
+        if len(_nexrad_cache.keys()) > 5:
             first_key = next(iter(_nexrad_cache))
             del _nexrad_cache[first_key]
     return _nexrad_cache[path]
@@ -41,7 +41,7 @@ def _read_nexrad_cache(path):
 def _grab_90_degree_rays(radar):
     """Special case for column right over the radar in an RHI"""
     # Get the rays within 0.5 degrees of 90 degrees
-    ray = np.argmin(radar.elevation["data"] - 90.0)
+    ray = np.argmin(np.abs(radar.elevation["data"] - 90.0))
     moment = {key: [] for key in radar.fields.keys()}
     # Determine the center of each gate for the subsetted rays.
     rhi_z = radar.range["data"]
@@ -193,12 +193,11 @@ def get_nexrad_column(
     response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
     file_list = file_list + [x["Key"] for x in response["Contents"]]
     time_list = []
-    for filepath in file_list:
+    for filepath in file_list[:]:
         name = filepath.split("/")[-1]
         if name[-3:] == "MDM":
-            time_list.append(
-                datetime.datetime.strptime(name, f"{nexrad_radar}%Y%m%d_%H%M%S_V06_MDM")
-            )
+            file_list.remove(filepath)
+            continue
         else:
             time_list.append(
                 datetime.datetime.strptime(name, f"{nexrad_radar}%Y%m%d_%H%M%S_V06")
@@ -212,16 +211,31 @@ def get_nexrad_column(
         for lat, lon in zip(lats, lons):
             # Make sure we are interpolating from the radar's location above sea level
             # NOTE: interpolating throughout Troposphere to match sonde to in the future
-
             da = pyart.util.columnsect.column_vertical_profile(radar_obj, lat, lon)
-            da = da.sortby("height")
             # check for valid heights
             valid = np.isfinite(da["height"])
             n_valid = int(valid.sum())
             if n_valid > 0:
-                da = da.sortby("height").interp(height=height_bins)
+                try:
+                    # Drop all NaNs
+                    da = (
+                        da.isel(height=valid)
+                        .sortby("height")
+                        .interp(height=height_bins)
+                    )
+                except pd.errors.InvalidIndexError:
+                    da = da.drop_duplicates("height", keep="first")
+
+                    valid = np.isfinite(da["height"])
+                    da = (
+                        da.isel(height=valid)
+                        .sortby("height")
+                        .interp(height=height_bins)
+                    )
             else:
-                target_height = xr.DataArray(height_bins, dims="height", name="height")
+                target_height = xr.DataArray(
+                    height_bins, dims="height", name="height"
+                )
                 da = da.reindex(height=target_height)
 
             # Add the latitude and longitude of the extracted column
