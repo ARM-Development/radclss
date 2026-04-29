@@ -301,6 +301,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
+                    height_bins=height_bins
                 )
 
             results = current_client.map(_get_nexrad_wrapper, time_list)
@@ -337,6 +338,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
+                    height_bins=height_bins
                 )
 
             successful_count = 0
