@@ -505,7 +505,7 @@ def subset_points(
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
 
-                if "vpt" in radar.scan_type:
+                if "vpt" in radar.metadata["scan_mode"]:
                     if radar.metadata.get("facility_id", "") == site:
                         da = _vpt_to_column_timeseries(radar, height_bins)
                     else:
