@@ -157,6 +157,7 @@ def _vpt_to_column_timeseries(radar, height_bins):
         data_vars[key] = xr.DataArray(arr, dims=["time", "height"], attrs=attrs)
 
     ds = xr.Dataset(data_vars, coords={"height": zgate, "time": abs_times})
+    ds = ds.drop_duplicates("time", keep="first")
 
     valid_h = np.isfinite(ds["height"])
     if int(valid_h.sum()) > 0:
@@ -172,12 +173,11 @@ def _vpt_to_column_timeseries(radar, height_bins):
     else:
         ds = ds.reindex(height=xr.DataArray(height_bins, dims="height", name="height"))
 
-    abs_times_s = abs_times.astype("datetime64[s]")
-    ds["base_time"] = xr.DataArray(abs_times_s, dims="time")
-    ds["time_offset"] = xr.DataArray(
-        ray_time_offsets.values.astype("timedelta64[s]"), dims="time"
-    )
-    ds["gate_time"] = xr.DataArray(abs_times_s, dims="time")
+    dedup_times_s = ds["time"].values.astype("datetime64[s]")
+    dedup_offsets = (ds["time"].values - base_vol_time).astype("timedelta64[s]")
+    ds["base_time"] = xr.DataArray(dedup_times_s, dims="time")
+    ds["time_offset"] = xr.DataArray(dedup_offsets, dims="time")
+    ds["gate_time"] = xr.DataArray(dedup_times_s, dims="time")
 
     height_des = (
         "Height Above Sea Level [in meters] for the Center of Each"
@@ -210,7 +210,6 @@ def _vpt_nan_fill(radar, height_bins):
     )
     ray_time_offsets = pd.to_timedelta(radar.time["data"], unit="s")
     abs_times = (base_vol_time + ray_time_offsets).astype("datetime64[ns]")
-    abs_times_s = abs_times.astype("datetime64[s]")
 
     nrays = radar.nrays
     n_heights = len(height_bins)
@@ -234,11 +233,13 @@ def _vpt_nan_fill(radar, height_bins):
         )
 
     ds = xr.Dataset(data_vars, coords={"height": height_bins, "time": abs_times})
-    ds["base_time"] = xr.DataArray(abs_times_s, dims="time")
-    ds["time_offset"] = xr.DataArray(
-        ray_time_offsets.values.astype("timedelta64[s]"), dims="time"
-    )
-    ds["gate_time"] = xr.DataArray(abs_times_s, dims="time")
+    ds = ds.drop_duplicates("time", keep="first")
+
+    dedup_times_s = ds["time"].values.astype("datetime64[s]")
+    dedup_offsets = (ds["time"].values - base_vol_time).astype("timedelta64[s]")
+    ds["base_time"] = xr.DataArray(dedup_times_s, dims="time")
+    ds["time_offset"] = xr.DataArray(dedup_offsets, dims="time")
+    ds["gate_time"] = xr.DataArray(dedup_times_s, dims="time")
 
     height_des = (
         "Height Above Sea Level [in meters] for the Center of Each"
