@@ -386,9 +386,18 @@ def radclss(
         if verbose:
             print(f"  Processing {k}...")
         valid = [data for data in columns[k] if data is not None]
+        # Non-VPT datasets have no 'time' dimension; VPT datasets do.
+        # Expand non-VPT datasets so all entries have a consistent 'time'
+        # coordinate before concatenation.
+        expanded = []
+        for ds in valid:
+            if "time" not in ds.dims:
+                bt = np.atleast_1d(ds["base_time"].values.flat[0])
+                ds = ds.expand_dims("time").assign_coords(time=bt)
+            expanded.append(ds)
         chunks = [
-            xr.concat(valid[i : i + _CONCAT_CHUNK], dim="time")
-            for i in range(0, len(valid), _CONCAT_CHUNK)
+            xr.concat(expanded[i : i + _CONCAT_CHUNK], dim="time")
+            for i in range(0, len(expanded), _CONCAT_CHUNK)
         ]
         ds_concat[k] = xr.concat(chunks, dim="time") if len(chunks) > 1 else chunks[0]
         if verbose:
