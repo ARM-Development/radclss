@@ -232,7 +232,9 @@ def radclss(
     max_times = {}
     for k in columns.keys():
         if "radar" in k and len(columns[k]) > 0:
-            times = np.array([x["base_time"].values[0] for x in columns[k]])
+            times = np.array(
+                [x["base_time"].values.flat[0] for x in columns[k] if x is not None]
+            )
             min_times[k] = np.min(times)
             max_times[k] = np.max(times)
             if verbose:
