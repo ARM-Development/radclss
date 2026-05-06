@@ -126,6 +126,138 @@ def _grab_90_degree_rays(radar):
     return column
 
 
+def _vpt_to_column_timeseries(radar, height_bins):
+    """Convert all rays of a VPT scan to a time series of columns.
+
+    For VPT scans elevation ≈ 90°, so gate range ≈ height above radar.
+    Each ray becomes one time step; all rays are stacked into a (time, height) dataset.
+    """
+    zgate = radar.range["data"]
+
+    base_vol_time = np.datetime64(
+        pyart.util.datetime_from_radar(radar).isoformat(), "ns"
+    )
+    ray_time_offsets = pd.to_timedelta(radar.time["data"], unit="s")
+    abs_times = (base_vol_time + ray_time_offsets).astype("datetime64[ns]")
+
+    da_meta = [
+        "units",
+        "standard_name",
+        "long_name",
+        "valid_max",
+        "valid_min",
+        "coordinates",
+    ]
+    data_vars = {}
+    for key in radar.fields:
+        arr = np.ma.filled(radar.fields[key]["data"], np.nan).astype(float)
+        attrs = {
+            tag: radar.fields[key][tag] for tag in da_meta if tag in radar.fields[key]
+        }
+        data_vars[key] = xr.DataArray(arr, dims=["time", "height"], attrs=attrs)
+
+    ds = xr.Dataset(data_vars, coords={"height": zgate, "time": abs_times})
+    #ds = ds.dropna("height")
+    valid_h = np.isfinite(ds["height"])
+    print(ds["reflectivity"], np.sum(np.isnan(ds["reflectivity"].values)))
+    if int(valid_h.sum()) > 0:
+        try:
+            ds = ds.sortby("height").interp(height=height_bins)
+        except pd.errors.InvalidIndexError:
+            ds = (
+                ds.drop_duplicates("height", keep="first")
+                .sortby("height")
+                .interp(height=height_bins)
+            )
+    else:
+        ds = ds.reindex(height=xr.DataArray(height_bins, dims="height", name="height"))
+    print(ds["reflectivity"][:, :150])
+    dedup_times_s = ds["time"].values.astype("datetime64[s]")
+    dedup_offsets = (ds["time"].values - base_vol_time).astype("timedelta64[s]")
+    ds["base_time"] = xr.DataArray(dedup_times_s, dims="time")
+    ds["time_offset"] = xr.DataArray(dedup_offsets, dims="time")
+    ds["gate_time"] = xr.DataArray(dedup_times_s, dims="time")
+
+    height_des = (
+        "Height Above Sea Level [in meters] for the Center of Each"
+        + " Radar Gate Above the Target Location"
+    )
+    ds.height.attrs.update(
+        long_name="Height of Radar Beam",
+        units="m",
+        standard_name="height",
+        description=height_des,
+    )
+    ds["base_time"].attrs.update(long_name="UTC Reference Time", units="seconds")
+    ds["time_offset"].attrs.update(
+        long_name="Time in Seconds Since Volume Start", units="seconds"
+    )
+    ds.attrs["distance_from_radar"] = "0 km"
+    ds.attrs["latitude_of_location"] = str(radar.latitude["data"][0]) + " degrees"
+    ds.attrs["longitude_of_location"] = str(radar.longitude["data"][0]) + " degrees"
+    return ds
+
+
+def _vpt_nan_fill(radar, height_bins):
+    """Return a NaN-filled dataset matching the VPT column time-series shape.
+
+    Used for stations that are not co-located with the VPT radar site so that
+    the time axis still aligns with the radar-site columns.
+    """
+    base_vol_time = np.datetime64(
+        pyart.util.datetime_from_radar(radar).isoformat(), "ns"
+    )
+    ray_time_offsets = pd.to_timedelta(radar.time["data"], unit="s")
+    abs_times = (base_vol_time + ray_time_offsets).astype("datetime64[ns]")
+
+    nrays = radar.nrays
+    n_heights = len(height_bins)
+    da_meta = [
+        "units",
+        "standard_name",
+        "long_name",
+        "valid_max",
+        "valid_min",
+        "coordinates",
+    ]
+    data_vars = {}
+    for key in radar.fields:
+        attrs = {
+            tag: radar.fields[key][tag] for tag in da_meta if tag in radar.fields[key]
+        }
+        data_vars[key] = xr.DataArray(
+            np.full((nrays, n_heights), np.nan),
+            dims=["time", "height"],
+            attrs=attrs,
+        )
+
+    ds = xr.Dataset(data_vars, 
+            coords={"height": height_bins, "time": abs_times})
+    ds = ds.drop_duplicates("time", keep="first")
+
+    dedup_times_s = ds["time"].values.astype("datetime64[s]")
+    dedup_offsets = (ds["time"].values - base_vol_time).astype("timedelta64[s]")
+    ds["base_time"] = xr.DataArray(dedup_times_s, dims="time")
+    ds["time_offset"] = xr.DataArray(dedup_offsets, dims="time")
+    ds["gate_time"] = xr.DataArray(dedup_times_s, dims="time")
+
+    height_des = (
+        "Height Above Sea Level [in meters] for the Center of Each"
+        + " Radar Gate Above the Target Location"
+    )
+    ds.height.attrs.update(
+        long_name="Height of Radar Beam",
+        units="m",
+        standard_name="height",
+        description=height_des,
+    )
+    ds["base_time"].attrs.update(long_name="UTC Reference Time", units="seconds")
+    ds["time_offset"].attrs.update(
+        long_name="Time in Seconds Since Volume Start", units="seconds"
+    )
+    return ds
+
+
 def get_nexrad_column(
     rad_time,
     site,
@@ -386,6 +518,16 @@ def subset_points(
             for lat, lon, site in zip(lats, lons, sites):
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
+
+                if "vpt" in radar.metadata["scan_mode"]:
+                    if radar.metadata.get("facility_id", "") == site:
+                        da = _vpt_to_column_timeseries(radar, height_bins)
+                    else:
+                        da = _vpt_nan_fill(radar, height_bins)
+                    da["lat"] = lat
+                    da["lon"] = lon
+                    column_list.append(da)
+                    continue
 
                 if "rhi" not in radar.scan_type:
                     da = pyart.util.columnsect.column_vertical_profile(radar, lat, lon)

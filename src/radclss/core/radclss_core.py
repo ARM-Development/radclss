@@ -232,7 +232,9 @@ def radclss(
     max_times = {}
     for k in columns.keys():
         if "radar" in k and len(columns[k]) > 0:
-            times = np.array([x["base_time"].values[0] for x in columns[k]])
+            times = np.array(
+                [x["base_time"].values.flat[0] for x in columns[k] if x is not None]
+            )
             min_times[k] = np.min(times)
             max_times[k] = np.max(times)
             if verbose:
@@ -386,9 +388,18 @@ def radclss(
         if verbose:
             print(f"  Processing {k}...")
         valid = [data for data in columns[k] if data is not None]
+        # Non-VPT datasets have no 'time' dimension; VPT datasets do.
+        # Expand non-VPT datasets so all entries have a consistent 'time'
+        # coordinate before concatenation.
+        expanded = []
+        for ds in valid:
+            if "time" not in ds.dims:
+                bt = np.atleast_1d(ds["base_time"].values.flat[0])
+                ds = ds.expand_dims("time").assign_coords(time=bt)
+            expanded.append(ds)
         chunks = [
-            xr.concat(valid[i : i + _CONCAT_CHUNK], dim="time")
-            for i in range(0, len(valid), _CONCAT_CHUNK)
+            xr.concat(expanded[i : i + _CONCAT_CHUNK], dim="time")
+            for i in range(0, len(expanded), _CONCAT_CHUNK)
         ]
         ds_concat[k] = xr.concat(chunks, dim="time") if len(chunks) > 1 else chunks[0]
         if verbose:
@@ -425,6 +436,7 @@ def radclss(
         print("=" * 80)
         print(f"  Time coordinate method: {time_coords}")
 
+    ds_concat[k] = ds_concat[k].drop_duplicates('time')
     if "radar" in time_coords:
         if verbose:
             print(f"  Reindexing all datasets to {time_coords} time coordinates")
