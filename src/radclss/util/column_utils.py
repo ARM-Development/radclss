@@ -41,7 +41,7 @@ def _read_nexrad_cache(path):
 def _grab_90_degree_rays(radar):
     """Special case for column right over the radar in an RHI"""
     # Get the rays within 0.5 degrees of 90 degrees
-    ray = np.argmin(radar.elevation["data"] - 90.0)
+    ray = np.argmin(np.abs(radar.elevation["data"] - 90.0))
     moment = {key: [] for key in radar.fields.keys()}
     # Determine the center of each gate for the subsetted rays.
     rhi_z = radar.range["data"]
@@ -132,7 +132,7 @@ def _vpt_to_column_timeseries(radar, height_bins):
     For VPT scans elevation ≈ 90°, so gate range ≈ height above radar.
     Each ray becomes one time step; all rays are stacked into a (time, height) dataset.
     """
-    zgate = radar.range["data"] + radar.altitude["data"][0]
+    zgate = radar.range["data"]
 
     base_vol_time = np.datetime64(
         pyart.util.datetime_from_radar(radar).isoformat(), "ns"
@@ -157,22 +157,21 @@ def _vpt_to_column_timeseries(radar, height_bins):
         data_vars[key] = xr.DataArray(arr, dims=["time", "height"], attrs=attrs)
 
     ds = xr.Dataset(data_vars, coords={"height": zgate, "time": abs_times})
-    ds = ds.drop_duplicates("time", keep="first")
-
+    #ds = ds.dropna("height")
     valid_h = np.isfinite(ds["height"])
+    print(ds["reflectivity"], np.sum(np.isnan(ds["reflectivity"].values)))
     if int(valid_h.sum()) > 0:
         try:
-            ds = ds.dropna("height").sortby("height").interp(height=height_bins)
+            ds = ds.sortby("height").interp(height=height_bins)
         except pd.errors.InvalidIndexError:
             ds = (
                 ds.drop_duplicates("height", keep="first")
-                .dropna("height")
                 .sortby("height")
                 .interp(height=height_bins)
             )
     else:
         ds = ds.reindex(height=xr.DataArray(height_bins, dims="height", name="height"))
-
+    print(ds["reflectivity"][:, :150])
     dedup_times_s = ds["time"].values.astype("datetime64[s]")
     dedup_offsets = (ds["time"].values - base_vol_time).astype("timedelta64[s]")
     ds["base_time"] = xr.DataArray(dedup_times_s, dims="time")
@@ -232,7 +231,8 @@ def _vpt_nan_fill(radar, height_bins):
             attrs=attrs,
         )
 
-    ds = xr.Dataset(data_vars, coords={"height": height_bins, "time": abs_times})
+    ds = xr.Dataset(data_vars, 
+            coords={"height": height_bins, "time": abs_times})
     ds = ds.drop_duplicates("time", keep="first")
 
     dedup_times_s = ds["time"].values.astype("datetime64[s]")
