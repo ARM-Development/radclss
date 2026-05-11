@@ -21,9 +21,8 @@ dependencies = [
     "dask",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["radclss"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project.urls]
 Homepage = "https://www.github.com/ARM-Development/radclss"
