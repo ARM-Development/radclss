@@ -9,6 +9,12 @@ import numpy as np
 from distributed import Client, LocalCluster
 
 
+def _by_name(ds, name):
+    """Select the slice of ``ds`` whose ``station_name`` equals ``name``."""
+    idx = list(ds["station_name"].values).index(name)
+    return ds.isel(station=idx)
+
+
 def test_radclss_serial():
     test_data_path = arm_test_data.DATASETS.abspath
 
@@ -88,103 +94,68 @@ def test_radclss_serial():
     assert my_columns.dims["time"] == 6
     assert my_columns.dims["height"] == 32
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Radar and sonde data check
-    for site in my_columns["station"].values:
-        missing_value = (
-            my_columns["csapr2_reflectivity"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["csapr2_reflectivity"].sel(station=site) == missing_value
-        ).all()
+    for name in my_columns["station_name"].values:
+        col = _by_name(my_columns, name)
+        missing_value = col["csapr2_reflectivity"].attrs.get("missing_value", None)
+        assert not (col["csapr2_reflectivity"] == missing_value).all()
 
-    for site in ["M1", "S4", "S20", "S30", "S40"]:
+    for name in ["M1", "S4", "S20", "S30", "S40"]:
+        col = _by_name(my_columns, name)
         # Sonde data
-        missing_value = (
-            my_columns["sonde_u_wind"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_u_wind"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_v_wind"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_v_wind"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_temp"].sel(station=site).attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_temp"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_rh"].sel(station=site).attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_rh"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_bar_pres"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["sonde_bar_pres"].sel(station=site) == missing_value
-        ).all()
+        missing_value = col["sonde_u_wind"].attrs.get("missing_value", None)
+        assert not (col["sonde_u_wind"] == missing_value).all()
+        missing_value = col["sonde_v_wind"].attrs.get("missing_value", None)
+        assert not (col["sonde_v_wind"] == missing_value).all()
+        missing_value = col["sonde_temp"].attrs.get("missing_value", None)
+        assert not (col["sonde_temp"] == missing_value).all()
+        missing_value = col["sonde_rh"].attrs.get("missing_value", None)
+        assert not (col["sonde_rh"] == missing_value).all()
+        missing_value = col["sonde_bar_pres"].attrs.get("missing_value", None)
+        assert not (col["sonde_bar_pres"] == missing_value).all()
 
     # Met data check
-    for site in ["M1", "S20", "S30", "S40"]:
-        missing_value = (
-            my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert not (my_columns["temp_mean"].sel(station=site) == missing_value).all()
+    for name in ["M1", "S20", "S30", "S40"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["temp_mean"].attrs.get("_FillValue", None)
+        assert not (col["temp_mean"] == missing_value).all()
 
-    for site in ["S4"]:
-        missing_value = (
-            my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["temp_mean"].sel(station=site) == missing_value).all()
+    for name in ["S4"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["temp_mean"].attrs.get("_FillValue", None)
+        assert (col["temp_mean"] == missing_value).all()
 
     # Pluvio data check
-    missing_value = (
-        my_columns["accum_nrt"].sel(station="M1").attrs.get("_FillValue", None)
-    )
-    assert not (my_columns["accum_nrt"].sel(station="M1") == missing_value).all()
-    missing_value = (
-        my_columns["bucket_nrt"].sel(station="M1").attrs.get("_FillValue", None)
-    )
-    assert not (my_columns["bucket_nrt"].sel(station="M1") == missing_value).all()
+    m1 = _by_name(my_columns, "M1")
+    missing_value = m1["accum_nrt"].attrs.get("_FillValue", None)
+    assert not (m1["accum_nrt"] == missing_value).all()
+    missing_value = m1["bucket_nrt"].attrs.get("_FillValue", None)
+    assert not (m1["bucket_nrt"] == missing_value).all()
 
-    for site in ["S20", "S30", "S40", "S13", "S4"]:
-        missing_value = (
-            my_columns["accum_nrt"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["accum_nrt"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["bucket_nrt"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["bucket_nrt"].sel(station=site) == missing_value).all()
+    for name in ["S20", "S30", "S40", "S13", "S4"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["accum_nrt"].attrs.get("_FillValue", None)
+        assert (col["accum_nrt"] == missing_value).all()
+        missing_value = col["bucket_nrt"].attrs.get("_FillValue", None)
+        assert (col["bucket_nrt"] == missing_value).all()
 
     # LD data check
-    for site in ["M1", "S30"]:
-        missing_value = (
-            my_columns["ldquants_rain_rate"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["ldquants_rain_rate"].sel(station=site) == missing_value
-        ).all()
-        missing_value = (
-            my_columns["ldquants_med_diameter"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["ldquants_med_diameter"].sel(station=site) == missing_value
-        ).all()
+    for name in ["M1", "S30"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["ldquants_rain_rate"].attrs.get("missing_value", None)
+        assert not (col["ldquants_rain_rate"] == missing_value).all()
+        missing_value = col["ldquants_med_diameter"].attrs.get("missing_value", None)
+        assert not (col["ldquants_med_diameter"] == missing_value).all()
 
 
 def test_radclss_parallel():
@@ -267,103 +238,68 @@ def test_radclss_parallel():
     assert my_columns.dims["time"] == 6
     assert my_columns.dims["height"] == 32
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Radar and sonde data check
-    for site in my_columns["station"].values:
-        missing_value = (
-            my_columns["csapr2_reflectivity"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["csapr2_reflectivity"].sel(station=site) == missing_value
-        ).all()
+    for name in my_columns["station_name"].values:
+        col = _by_name(my_columns, name)
+        missing_value = col["csapr2_reflectivity"].attrs.get("missing_value", None)
+        assert not (col["csapr2_reflectivity"] == missing_value).all()
 
-    for site in ["M1", "S4", "S20", "S30", "S40"]:
+    for name in ["M1", "S4", "S20", "S30", "S40"]:
+        col = _by_name(my_columns, name)
         # Sonde data
-        missing_value = (
-            my_columns["sonde_u_wind"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_u_wind"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_v_wind"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_v_wind"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_temp"].sel(station=site).attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_temp"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_rh"].sel(station=site).attrs.get("missing_value", None)
-        )
-        assert not (my_columns["sonde_rh"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["sonde_bar_pres"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["sonde_bar_pres"].sel(station=site) == missing_value
-        ).all()
+        missing_value = col["sonde_u_wind"].attrs.get("missing_value", None)
+        assert not (col["sonde_u_wind"] == missing_value).all()
+        missing_value = col["sonde_v_wind"].attrs.get("missing_value", None)
+        assert not (col["sonde_v_wind"] == missing_value).all()
+        missing_value = col["sonde_temp"].attrs.get("missing_value", None)
+        assert not (col["sonde_temp"] == missing_value).all()
+        missing_value = col["sonde_rh"].attrs.get("missing_value", None)
+        assert not (col["sonde_rh"] == missing_value).all()
+        missing_value = col["sonde_bar_pres"].attrs.get("missing_value", None)
+        assert not (col["sonde_bar_pres"] == missing_value).all()
 
     # Met data check
-    for site in ["M1", "S20", "S30", "S40"]:
-        missing_value = (
-            my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert not (my_columns["temp_mean"].sel(station=site) == missing_value).all()
+    for name in ["M1", "S20", "S30", "S40"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["temp_mean"].attrs.get("_FillValue", None)
+        assert not (col["temp_mean"] == missing_value).all()
 
-    for site in ["S4"]:
-        missing_value = (
-            my_columns["temp_mean"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["temp_mean"].sel(station=site) == missing_value).all()
+    for name in ["S4"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["temp_mean"].attrs.get("_FillValue", None)
+        assert (col["temp_mean"] == missing_value).all()
 
     # Pluvio data check
-    missing_value = (
-        my_columns["accum_nrt"].sel(station="M1").attrs.get("_FillValue", None)
-    )
-    assert not (my_columns["accum_nrt"].sel(station="M1") == missing_value).all()
-    missing_value = (
-        my_columns["bucket_nrt"].sel(station="M1").attrs.get("_FillValue", None)
-    )
-    assert not (my_columns["bucket_nrt"].sel(station="M1") == missing_value).all()
+    m1 = _by_name(my_columns, "M1")
+    missing_value = m1["accum_nrt"].attrs.get("_FillValue", None)
+    assert not (m1["accum_nrt"] == missing_value).all()
+    missing_value = m1["bucket_nrt"].attrs.get("_FillValue", None)
+    assert not (m1["bucket_nrt"] == missing_value).all()
 
-    for site in ["S20", "S30", "S40", "S13", "S4"]:
-        missing_value = (
-            my_columns["accum_nrt"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["accum_nrt"].sel(station=site) == missing_value).all()
-        missing_value = (
-            my_columns["bucket_nrt"].sel(station=site).attrs.get("_FillValue", None)
-        )
-        assert (my_columns["bucket_nrt"].sel(station=site) == missing_value).all()
+    for name in ["S20", "S30", "S40", "S13", "S4"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["accum_nrt"].attrs.get("_FillValue", None)
+        assert (col["accum_nrt"] == missing_value).all()
+        missing_value = col["bucket_nrt"].attrs.get("_FillValue", None)
+        assert (col["bucket_nrt"] == missing_value).all()
 
     # LD data check
-    for site in ["M1", "S30"]:
-        missing_value = (
-            my_columns["ldquants_rain_rate"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["ldquants_rain_rate"].sel(station=site) == missing_value
-        ).all()
-        missing_value = (
-            my_columns["ldquants_med_diameter"]
-            .sel(station=site)
-            .attrs.get("missing_value", None)
-        )
-        assert not (
-            my_columns["ldquants_med_diameter"].sel(station=site) == missing_value
-        ).all()
+    for name in ["M1", "S30"]:
+        col = _by_name(my_columns, name)
+        missing_value = col["ldquants_rain_rate"].attrs.get("missing_value", None)
+        assert not (col["ldquants_rain_rate"] == missing_value).all()
+        missing_value = col["ldquants_med_diameter"].attrs.get("missing_value", None)
+        assert not (col["ldquants_med_diameter"] == missing_value).all()
 
 
 def test_subset_points():
@@ -400,7 +336,8 @@ def test_subset_points():
         "S30": (34.38501, -86.92757, 183),
     }
     subset_ds = radclss.util.subset_points(radar_files[0], input_site_dict, sonde=None)
-    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert set(subset_ds["station_name"].values) == {"M1", "S30"}
+    assert np.array_equal(subset_ds["station"].values, np.arange(2))
     assert "reflectivity" in subset_ds.data_vars
     assert subset_ds.dims["station"] == 2
     assert np.array_equal(subset_ds["height"].values, np.arange(500, 8500, 250))
@@ -415,7 +352,7 @@ def test_subset_points():
     subset_ds = radclss.util.subset_points(
         radar_files[0], input_site_dict, sonde=sonde_files
     )
-    assert set(subset_ds["station"].values) == {"M1", "S30"}
+    assert set(subset_ds["station_name"].values) == {"M1", "S30"}
     assert np.array_equal(subset_ds["height"].values, np.arange(500, 8500, 250))
     assert "reflectivity" in subset_ds.data_vars
     assert "sonde_u_wind" in subset_ds.data_vars
@@ -532,9 +469,15 @@ def test_radclss_with_kasacr():
     # Basic structure checks
     assert isinstance(my_columns, xr.Dataset)
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Check that CSAPR2 data exists
     assert (
@@ -552,7 +495,7 @@ def test_radclss_with_kasacr():
         assert len(kasacr_vars) > 0, "Expected KASACR variables in dataset"
 
         # Check that KASACR reflectivity data exists
-        for site in my_columns["station"].values:
+        for name in my_columns["station_name"].values:
             # Find reflectivity variable for KASACR
             kasacr_refl_vars = [
                 var
@@ -561,15 +504,12 @@ def test_radclss_with_kasacr():
             ]
             if len(kasacr_refl_vars) > 0:
                 kasacr_refl = kasacr_refl_vars[0]
-                missing_value = (
-                    my_columns[kasacr_refl]
-                    .sel(station=site)
-                    .attrs.get("missing_value", None)
-                )
+                col = _by_name(my_columns, name)
+                missing_value = col[kasacr_refl].attrs.get("missing_value", None)
                 # At least some data should be non-missing
                 assert not (
-                    my_columns[kasacr_refl].sel(station=site) == missing_value
-                ).all(), f"All KASACR data is missing for station {site}"
+                    col[kasacr_refl] == missing_value
+                ).all(), f"All KASACR data is missing for station {name}"
 
 
 def test_radclss_with_kazr():
@@ -677,9 +617,15 @@ def test_radclss_with_kazr():
     # Basic structure checks
     assert isinstance(my_columns, xr.Dataset)
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Check that CSAPR2 data exists
     assert (
@@ -697,7 +643,7 @@ def test_radclss_with_kazr():
         assert len(kazr_vars) > 0, "Expected KAZR variables in dataset"
 
         # Check that KAZR reflectivity data exists
-        for site in my_columns["station"].values:
+        for name in my_columns["station_name"].values:
             # Find reflectivity variable for KAZR
             kazr_refl_vars = [
                 var
@@ -706,15 +652,12 @@ def test_radclss_with_kazr():
             ]
             if len(kazr_refl_vars) > 0:
                 kazr_refl = kazr_refl_vars[0]
-                missing_value = (
-                    my_columns[kazr_refl]
-                    .sel(station=site)
-                    .attrs.get("missing_value", None)
-                )
+                col = _by_name(my_columns, name)
+                missing_value = col[kazr_refl].attrs.get("missing_value", None)
                 # At least some data should be non-missing
                 assert not (
-                    my_columns[kazr_refl].sel(station=site) == missing_value
-                ).all(), f"All KAZR data is missing for station {site}"
+                    col[kazr_refl] == missing_value
+                ).all(), f"All KAZR data is missing for station {name}"
 
 
 def test_radclss_parallel_with_nexrad():
@@ -773,9 +716,15 @@ def test_radclss_parallel_with_nexrad():
     # Basic structure checks
     assert isinstance(my_columns, xr.Dataset)
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Check that CSAPR2 data exists
     csapr2_vars = [var for var in my_columns.data_vars if "csapr2" in var.lower()]
@@ -790,7 +739,7 @@ def test_radclss_parallel_with_nexrad():
     assert len(nexrad_vars) > 0, "Expected NEXRAD variables in dataset"
 
     # Check that both radar systems have reflectivity data
-    for site in my_columns["station"].values:
+    for name in my_columns["station_name"].values:
         # Find CSAPR2 reflectivity
         csapr2_refl_vars = [
             var
@@ -799,15 +748,12 @@ def test_radclss_parallel_with_nexrad():
         ]
         if len(csapr2_refl_vars) > 0:
             csapr2_refl = csapr2_refl_vars[0]
-            missing_value = (
-                my_columns[csapr2_refl]
-                .sel(station=site)
-                .attrs.get("missing_value", None)
-            )
+            col = _by_name(my_columns, name)
+            missing_value = col[csapr2_refl].attrs.get("missing_value", None)
             # At least some data should be non-missing
             assert not (
-                my_columns[csapr2_refl].sel(station=site) == missing_value
-            ).all(), f"All CSAPR2 data is missing for station {site}"
+                col[csapr2_refl] == missing_value
+            ).all(), f"All CSAPR2 data is missing for station {name}"
 
 
 def test_radclss_parallel_with_kasacr():
@@ -917,9 +863,15 @@ def test_radclss_parallel_with_kasacr():
     # Basic structure checks
     assert isinstance(my_columns, xr.Dataset)
     assert my_columns.dims["station"] == 6
-    assert np.array_equal(
-        my_columns["station"].values, ["M1", "S4", "S20", "S30", "S40", "S13"]
-    )
+    assert np.array_equal(my_columns["station"].values, np.arange(6))
+    assert list(my_columns["station_name"].values) == [
+        "M1",
+        "S4",
+        "S20",
+        "S30",
+        "S40",
+        "S13",
+    ]
 
     # Check that CSAPR2 data exists
     assert (
@@ -934,7 +886,7 @@ def test_radclss_parallel_with_kasacr():
         assert len(kasacr_vars) > 0, "Expected KASACR variables in dataset"
 
         # Check that KASACR reflectivity data exists
-        for site in my_columns["station"].values:
+        for name in my_columns["station_name"].values:
             # Find reflectivity variable for KASACR
             kasacr_refl_vars = [
                 var
@@ -943,15 +895,12 @@ def test_radclss_parallel_with_kasacr():
             ]
             if len(kasacr_refl_vars) > 0:
                 kasacr_refl = kasacr_refl_vars[0]
-                missing_value = (
-                    my_columns[kasacr_refl]
-                    .sel(station=site)
-                    .attrs.get("missing_value", None)
-                )
+                col = _by_name(my_columns, name)
+                missing_value = col[kasacr_refl].attrs.get("missing_value", None)
                 # At least some data should be non-missing
                 assert not (
-                    my_columns[kasacr_refl].sel(station=site) == missing_value
-                ).all(), f"All KASACR data is missing for station {site}"
+                    col[kasacr_refl] == missing_value
+                ).all(), f"All KASACR data is missing for station {name}"
 
 
 def test_match_datasets_act():

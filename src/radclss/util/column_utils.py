@@ -18,6 +18,29 @@ _sonde_cache = {}
 _nexrad_cache = {}
 
 
+def _station_index(ds, station):
+    """Return integer index along the ``station`` dim for a name or int.
+
+    ``station`` may be a single value or array-like of names/ints. Names are
+    looked up against ``ds["station_name"]`` if present, otherwise against
+    ``ds["station"]`` for back-compat with datasets that stored string names
+    directly on the ``station`` coord. Ints are returned as-is.
+    """
+    if np.isscalar(station):
+        if isinstance(station, (int, np.integer)):
+            return int(station)
+        if "station_name" in ds.variables:
+            names = ds["station_name"].values
+        else:
+            names = ds["station"].values
+        matches = np.where(names == station)[0]
+        if len(matches) == 0:
+            raise ValueError(f"Station '{station}' not found in dataset")
+        return int(matches[0])
+
+    return np.array([_station_index(ds, s) for s in station], dtype=int)
+
+
 def _read_sonde_cached(path, exclude):
     """Return a fully-loaded sonde dataset, reading from disk only on first call."""
     if path not in _sonde_cache:
@@ -157,7 +180,7 @@ def _vpt_to_column_timeseries(radar, height_bins):
         data_vars[key] = xr.DataArray(arr, dims=["time", "height"], attrs=attrs)
 
     ds = xr.Dataset(data_vars, coords={"height": zgate, "time": abs_times})
-    #ds = ds.dropna("height")
+    # ds = ds.dropna("height")
     valid_h = np.isfinite(ds["height"])
     print(ds["reflectivity"], np.sum(np.isnan(ds["reflectivity"].values)))
     if int(valid_h.sum()) > 0:
@@ -231,8 +254,7 @@ def _vpt_nan_fill(radar, height_bins):
             attrs=attrs,
         )
 
-    ds = xr.Dataset(data_vars, 
-            coords={"height": height_bins, "time": abs_times})
+    ds = xr.Dataset(data_vars, coords={"height": height_bins, "time": abs_times})
     ds = ds.drop_duplicates("time", keep="first")
 
     dedup_times_s = ds["time"].values.astype("datetime64[s]")
@@ -365,9 +387,7 @@ def get_nexrad_column(
                         .interp(height=height_bins)
                     )
             else:
-                target_height = xr.DataArray(
-                    height_bins, dims="height", name="height"
-                )
+                target_height = xr.DataArray(height_bins, dims="height", name="height")
                 da = da.reindex(height=target_height)
 
             # Add the latitude and longitude of the extracted column
@@ -691,7 +711,6 @@ def _prepare_match(
             "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
         )
 
-    matched = matched.assign_coords(coords=dict(station=site))
     matched = matched.expand_dims("station")
 
     for attr in ("lat", "lon", "alt"):
@@ -707,10 +726,11 @@ def _prepare_match(
 
 def _apply_match(column, site, matched):
     """Merge a prepared match result into ``column`` in-place and return it."""
+    site_idx = _station_index(column, site)
     for k in matched.data_vars:
         if k in column.data_vars:
-            column[k].sel(station=site)[:] = matched.sel(station=site)[k][:].astype(
-                column[k].dtype
+            column[k].isel(station=site_idx)[:] = (
+                matched[k].isel(station=0)[:].astype(column[k].dtype)
             )
             if "_FillValue" in column[k].attrs:
                 if isinstance(column[k].attrs["_FillValue"], str):
@@ -806,7 +826,8 @@ def match_datasets_act(
 
 
 def _add_station_vars(ds, sites, site_alt):
-    ds["station"] = sites
+    ds["station"] = ("station", np.arange(len(sites), dtype=int))
+    ds = ds.assign_coords(station_name=("station", np.asarray(sites)))
     # Assign the Main and Supplemental Site altitudes
     ds = ds.assign(alt=("station", site_alt))
     # Add attributes for Time, Latitude, Longitude, and Sites
@@ -815,6 +836,7 @@ def _add_station_vars(ds, sites, site_alt):
     ds.gate_time.attrs.update(output_config["gate_time_attrs"])
     ds.time_offset.attrs.update(output_config["time_offset_attrs"])
     ds.station.attrs.update(output_config["station_attrs"])
+    ds.coords["station_name"].attrs.update(output_config["station_name_attrs"])
     ds.lat.attrs.update(output_config["lat_attrs"])
     ds.lon.attrs.update(output_config["lon_attrs"])
     ds.alt.attrs.update(output_config["alt_attrs"])

@@ -25,7 +25,7 @@ def radclss(
     dod_version="1.0",
     discard_var={},
     verbose=False,
-    base_station="M1",
+    base_station=0,
     current_client=None,
     nexrad=True,
     nexrad_site=None,
@@ -73,8 +73,8 @@ def radclss(
         Dictionary containing variables to drop from each datastream. Default is {}.
     verbose : bool, optional
         Option to print additional information during processing. Default is False.
-    base_station : str, optional
-        The base station name to use for time variables. Default is "M1".
+    base_station : int, optional
+        The base station index to use for time variables. Default is 0.
     current_client : dask.distributed.Client, optional
         Option to supply an existing Dask client for parallel processing.
         Set to None to use the current active client. Default is None.
@@ -303,7 +303,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
-                    height_bins=height_bins
+                    height_bins=height_bins,
                 )
 
             results = current_client.map(_get_nexrad_wrapper, time_list)
@@ -340,7 +340,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
-                    height_bins=height_bins
+                    height_bins=height_bins,
                 )
 
             successful_count = 0
@@ -436,7 +436,7 @@ def radclss(
         print("=" * 80)
         print(f"  Time coordinate method: {time_coords}")
 
-    ds_concat[k] = ds_concat[k].drop_duplicates('time')
+    ds_concat[k] = ds_concat[k].drop_duplicates("time")
     if "radar" in time_coords:
         if verbose:
             print(f"  Reindexing all datasets to {time_coords} time coordinates")
@@ -541,7 +541,8 @@ def radclss(
             print(f" Time arrays from {k}:")
             print(ds_concat[k]["base_time"])
         ds_concat[k] = ds_concat[k].drop(["time_offset", "base_time"])
-    nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
+    if nexrad_columns is not None:
+        nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
     first_key = list(ds_concat.keys())[0]
     for k in list(ds_concat.keys())[1:]:
         for var in ds_concat[k].data_vars:
@@ -550,12 +551,13 @@ def radclss(
                     print(f"Dropping {var} from {k}")
                 ds_concat[k] = ds_concat[k].drop(var)
 
-    for var in nexrad_columns.data_vars:
-        for k in ds_concat.keys():
-            if var in ds_concat[k].data_vars:
-                if verbose:
-                    print(f"Dropping {var} from nexrad_columns")
-                nexrad_columns = nexrad_columns.drop(var)
+    if nexrad_columns is not None:
+        for var in nexrad_columns.data_vars:
+            for k in ds_concat.keys():
+                if var in ds_concat[k].data_vars:
+                    if verbose:
+                        print(f"Dropping {var} from nexrad_columns")
+                    nexrad_columns = nexrad_columns.drop(var)
 
     ds_concat = xr.merge([x for x in ds_concat.values()])
     if verbose:
@@ -601,8 +603,14 @@ def radclss(
 
     # Calculate time as seconds since base_time
     ds["time_offset"] = ds["time"]
-    ds["station"] = ds_concat["station"]
-    ds["height"] = ds_concat["height"]
+    ds["station"] = ("station", ds_concat["station"].values)
+    # The DOD may define station_name as a char-array data var (station, string_length_N).
+    # Replace it with a 1-D string coord populated from the source dataset.
+    if "station_name" in ds.variables:
+        ds = ds.drop_vars("station_name")
+    ds = ds.assign_coords(station_name=("station", ds_concat["station_name"].values))
+    ds.coords["station_name"].attrs.update(output_config["station_name_attrs"])
+    ds["height"] = ("height", ds_concat["height"].values)
     ds["lat"][:] = ds_concat.isel(time=0)["lat"][:]
     ds["lon"][:] = ds_concat.isel(time=0)["lon"][:]
     ds["alt"][:] = ds_concat.isel(time=0)["alt"][:]
@@ -708,7 +716,6 @@ def radclss(
             else:
                 instrument = k
                 site = base_station
-            site = site.upper()
 
             if instrument == "kazr2":
                 _instrument_tasks.append(

@@ -21,6 +21,10 @@ OUTPUT_TIME_OFFSET_ATTRS = dict(
 OUTPUT_STATION_ATTRS = dict(
     long_name="Bankhead National Forest AMF-3 In-Situ Ground Observation Station Identifers"
 )
+OUTPUT_STATION_NAME_ATTRS = dict(
+    long_name="Bankhead National Forest AMF-3 In-Situ Ground Observation Station Names"
+)
+
 OUTPUT_LAT_ATTRS = dict(
     long_name="Latitude of BNF AMF-3 Ground Observation Site", units="Degrees North"
 )
@@ -179,6 +183,7 @@ def get_output_config():
         "gate_time_attrs": OUTPUT_GATE_TIME_ATTRS,
         "time_offset_attrs": OUTPUT_TIME_OFFSET_ATTRS,
         "station_attrs": OUTPUT_STATION_ATTRS,
+        "station_name_attrs": OUTPUT_STATION_NAME_ATTRS,
         "lat_attrs": OUTPUT_LAT_ATTRS,
         "lon_attrs": OUTPUT_LON_ATTRS,
         "alt_attrs": OUTPUT_ALT_ATTRS,

@@ -9,6 +9,24 @@ from datetime import timedelta
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
+def _resolve_station(ds, station):
+    """Resolve a station identifier (str name or int index) to its int index.
+
+    Falls back to ``ds["station"]`` for legacy datasets that stored string
+    names directly on the ``station`` coord.
+    """
+    if isinstance(station, (int, np.integer)):
+        return int(station)
+    if "station_name" in ds.variables:
+        names = ds["station_name"].values
+    else:
+        names = ds["station"].values
+    matches = np.where(names == station)[0]
+    if len(matches) == 0:
+        raise ValueError(f"Station '{station}' not found in dataset")
+    return int(matches[0])
+
+
 def create_radclss_columns(
     radclss,
     field="corrected_reflectivity",
@@ -95,14 +113,19 @@ def create_radclss_columns(
         col = i % 2
         if len(axarr.shape) == 1:
             axarr = np.expand_dims(axarr, axis=0)
-        ds[field].sel(station=station).sel(
+        station_idx = _resolve_station(ds, station)
+        ds[field].isel(station=station_idx).sel(
             time=slice(
                 radar_time.strftime("%Y-%m-%dT00:00:00"),
                 final_time.strftime("%Y-%m-%dT00:00:00"),
             )
         ).plot(y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs)
         long_name = ds[field].attrs.get("long_name", field)
-        axarr[row, col].set_title(f"{station} {long_name}")
+        if "station_name" in ds.variables:
+            label = str(ds["station_name"].values[station_idx])
+        else:
+            label = str(ds["station"].values[station_idx])
+        axarr[row, col].set_title(f"{label} {long_name}")
 
     if isinstance(radclss, str):
         ds.close()
@@ -193,6 +216,12 @@ def create_radclss_rainfall_timeseries(
         print("\n")
         return
 
+    dis_idx = _resolve_station(ds, dis_site)
+    if "station_name" in ds.variables:
+        dis_name = str(ds["station_name"].values[dis_idx])
+    else:
+        dis_name = str(ds["station"].values[dis_idx])
+
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(
         np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
@@ -205,12 +234,12 @@ def create_radclss_rainfall_timeseries(
     # Top right hand subplot - Radar TimeSeries
     ax2 = fig.add_subplot(311)
 
-    ds[field].sel(station=dis_site).plot(
+    ds[field].isel(station=dis_idx).plot(
         x="time", ax=ax2, cmap=cmap, vmin=vmin, vmax=vmax
     )
 
     ax2.set_title(
-        "Extracted Radar Columns and In-Situ Sensors (RadCLss), BNF Site: " + dis_site
+        "Extracted Radar Columns and In-Situ Sensors (RadCLss), BNF Site: " + dis_name
     )
     ax2.set_ylabel("Height [m]")
     ax2.set_xlabel("Time [UTC]")
@@ -222,15 +251,15 @@ def create_radclss_rainfall_timeseries(
     ax3 = fig.add_subplot(312)
 
     # CMAC derived rain rate
-    ds["rain_rate_A"].sel(station=dis_site).sel(height=rheight, method="nearest").plot(
+    ds["rain_rate_A"].isel(station=dis_idx).sel(height=rheight, method="nearest").plot(
         x="time", ax=ax3, label="CMAC"
     )
 
     # Pluvio2 Weighing Bucket Rain Gauge
-    ds["intensity_rtnrt"].sel(station=dis_site).plot(x="time", ax=ax3, label="PLUVIO2")
+    ds["intensity_rtnrt"].isel(station=dis_idx).plot(x="time", ax=ax3, label="PLUVIO2")
 
     # LDQUANTS derived rain rate
-    ds["ldquants_rain_rate"].sel(station=dis_site).plot(
+    ds["ldquants_rain_rate"].isel(station=dis_idx).plot(
         x="time", ax=ax3, label="LDQUANTS"
     )
 
@@ -258,22 +287,22 @@ def create_radclss_rainfall_timeseries(
 
     # CMAC Accumulated Rain Rates
     radar_accum = act.utils.accumulate_precip(
-        ds.sel(station=dis_site).sel(height=rheight, method="nearest"), "rain_rate_A"
+        ds.isel(station=dis_idx).sel(height=rheight, method="nearest"), "rain_rate_A"
     ).compute()
     # CMAC Accumulated Rain Rates
     radar_accum["rain_rate_A_accumulated"].plot(x="time", ax=ax4, label="CMAC")
 
     # PLUVIO2 Accumulation
-    if dis_site == "M1":
+    if dis_name == "M1":
         gauge_precip_accum = act.utils.accumulate_precip(
-            ds.sel(station=dis_site), "intensity_rtnrt"
+            ds.isel(station=dis_idx), "intensity_rtnrt"
         ).intensity_rtnrt_accumulated.compute()
         gauge_precip_accum.plot(x="time", ax=ax4, label="PLUVIO2")
 
     # LDQUANTS Accumulation
-    if dis_site == "M1" or dis_site == "S30":
+    if dis_name == "M1" or dis_name == "S30":
         ld_precip_accum = act.utils.accumulate_precip(
-            ds.sel(station=dis_site), "ldquants_rain_rate"
+            ds.isel(station=dis_idx), "ldquants_rain_rate"
         ).ldquants_rain_rate_accumulated.compute()
         ld_precip_accum.plot(x="time", ax=ax4, label="LDQUANTS")
 
@@ -308,9 +337,9 @@ def create_radclss_rainfall_timeseries(
     # Clean up this function
     ax = np.array([ax2, ax3, ax4])
     del radar_accum
-    if dis_site == "M1" or dis_site == "S30":
+    if dis_name == "M1" or dis_name == "S30":
         del ld_precip_accum
-    if dis_site == "M1":
+    if dis_name == "M1":
         del gauge_precip_accum
     if isinstance(radclss, str):
         ds.close()
