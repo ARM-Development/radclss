@@ -101,6 +101,8 @@ def create_radclss_columns(
                 final_time.strftime("%Y-%m-%dT00:00:00"),
             )
         ).plot(y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs)
+        long_name = ds[field].attrs.get("long_name", field)
+        axarr[row, col].set_title(f"{station} {long_name}")
 
     if isinstance(radclss, str):
         ds.close()
