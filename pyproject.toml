@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radclss"
-version = "2026.5.11.1"
+version = "2026.5.20"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
 requires-python = ">=3.10"
