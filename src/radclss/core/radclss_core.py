@@ -4,6 +4,7 @@ import xarray as xr
 import act
 import numpy as np
 import pandas as pd
+import traceback
 
 
 from ..util.column_utils import (
@@ -201,8 +202,10 @@ def radclss(
                         )
                         columns[k].append(result)
 
-                    except Exception:
+                    except Exception as e:
                         result = None
+                        if verbose:
+                            traceback.print_exc()
                     if verbose:
                         if result is not None:
                             print(
@@ -710,7 +713,7 @@ def radclss(
                 site = base_station
             site = site.upper()
 
-            if instrument == "kazr2":
+            if instrument == "kazr2" or instrument == "kazr":
                 _instrument_tasks.append(
                     (
                         k,
