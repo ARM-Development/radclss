@@ -150,6 +150,7 @@ def _vpt_to_column_timeseries(radar, height_bins):
     ]
     data_vars = {}
     for key in radar.fields:
+        print(key, radar.fields[key]["data"].dtype)
         arr = np.ma.filled(radar.fields[key]["data"], np.nan).astype(float)
         attrs = {
             tag: radar.fields[key][tag] for tag in da_meta if tag in radar.fields[key]
@@ -518,7 +519,6 @@ def subset_points(
             for lat, lon, site in zip(lats, lons, sites):
                 # Make sure we are interpolating from the radar's location above sea level
                 # NOTE: interpolating throughout Troposphere to match sonde to in the future
-
                 if "vpt" in radar.metadata["scan_mode"]:
                     if radar.metadata.get("facility_id", "") == site:
                         da = _vpt_to_column_timeseries(radar, height_bins)
@@ -563,27 +563,27 @@ def subset_points(
                 da = da.sortby("height")
                 valid = np.isfinite(da["height"])
                 n_valid = int(valid.sum())
+                interpolated = False
+                dvars = da.data_vars
+                for v in dvars:
+                    if np.all(np.isnan(da[v].values)):
+                        da = da.drop(v)
                 if n_valid > 0:
-                    try:
-                        # Drop all NaNs
-                        da = (
-                            da.dropna("height")
-                            .sortby("height")
-                            .interp(height=height_bins)
-                        )
-                    except pd.errors.InvalidIndexError:
-                        da = da.drop_duplicates("height", keep="first")
-
-                        valid = np.isfinite(da["height"])
-                        da = (
-                            da.dropna("height")
-                            .sortby("height")
-                            .interp(height=height_bins)
-                        )
-                        time_offset = time_offset.drop_duplicates(
-                            "height", keep="first"
-                        )
-                else:
+                    da_clean = da.dropna("height").sortby("height")
+                    if da_clean.sizes.get("height", 0) > 0:
+                        try:
+                            da = da_clean.interp(height=height_bins)
+                        except pd.errors.InvalidIndexError:
+                            da_clean = da_clean.drop_duplicates(
+                                "height", keep="first"
+                            )
+                            da = da_clean.interp(height=height_bins)
+                            time_offset = time_offset.drop_duplicates(
+                                "height", keep="first"
+                            )
+                        interpolated = True
+                
+                if not interpolated:
                     target_height = xr.DataArray(
                         height_bins, dims="height", name="height"
                     )

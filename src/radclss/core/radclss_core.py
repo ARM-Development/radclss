@@ -4,6 +4,7 @@ import xarray as xr
 import act
 import numpy as np
 import pandas as pd
+import traceback
 
 
 from ..util.column_utils import (
@@ -203,6 +204,8 @@ def radclss(
 
                     except Exception:
                         result = None
+                        if verbose:
+                            traceback.print_exc()
                     if verbose:
                         if result is not None:
                             print(
@@ -303,7 +306,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
-                    height_bins=height_bins
+                    height_bins=height_bins,
                 )
 
             results = current_client.map(_get_nexrad_wrapper, time_list)
@@ -340,7 +343,7 @@ def radclss(
                     output_config["site"],
                     input_site_dict,
                     nexrad_radar=nexrad_site,
-                    height_bins=height_bins
+                    height_bins=height_bins,
                 )
 
             successful_count = 0
@@ -436,7 +439,7 @@ def radclss(
         print("=" * 80)
         print(f"  Time coordinate method: {time_coords}")
 
-    ds_concat[k] = ds_concat[k].drop_duplicates('time')
+    ds_concat[k] = ds_concat[k].drop_duplicates("time")
     if "radar" in time_coords:
         if verbose:
             print(f"  Reindexing all datasets to {time_coords} time coordinates")
@@ -710,7 +713,7 @@ def radclss(
                 site = base_station
             site = site.upper()
 
-            if instrument == "kazr2":
+            if instrument == "kazr2" or instrument == "kazr":
                 _instrument_tasks.append(
                     (
                         k,
