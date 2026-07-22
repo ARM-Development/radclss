@@ -60,6 +60,9 @@ DEFAULT_DISCARD_VAR = {
     "kazr2": [
         "signal_to_noise_ratio_crosspolar_v",
     ],
+    "kazr": [
+        "signal_to_noise_ratio_crosspolar_v",
+    ],
     "radar_csapr2": [
         "classification_mask",
         "censor_mask",
