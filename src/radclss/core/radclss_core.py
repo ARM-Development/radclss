@@ -472,18 +472,19 @@ def radclss(
         if verbose:
             print(f"  Resampling to {time_coords} intervals")
         for k in ds_concat.keys():
-            ds_concat[k] = ds_concat[k].resample(time=time_coords)
+            ds_concat[k] = ds_concat[k].resample(time=time_coords).mean()
         if nexrad:
-            nexrad_columns = nexrad_columns.resample(time=time_coords)
+            nexrad_columns = nexrad_columns.resample(time=time_coords).mean()
 
         # Then, reindex to the largest of the time arrays
         new_coordinates = pd.date_range(min_time, max_time, freq=time_coords)
         if verbose:
             print(f"    Creating new time grid: {len(new_coordinates)} time steps")
         for k in ds_concat.keys():
-            ds_concat[k] = ds_concat[k].reindex(time=new_coordinates)
+            ds_concat[k] = ds_concat[k].reindex(time=new_coordinates, method='nearest')
+            
         if nexrad:
-            nexrad_columns = nexrad_columns.reindex(time=new_coordinates)
+            nexrad_columns = nexrad_columns.reindex(time=new_coordinates, method='nearest')
     else:
         for k in ds_concat.keys():
             ds_concat[k] = ds_concat[k].reindex(time=ds_times, method="nearest")
@@ -542,9 +543,10 @@ def radclss(
     for k in ds_concat.keys():
         if verbose:
             print(f" Time arrays from {k}:")
-            print(ds_concat[k]["base_time"])
+
         ds_concat[k] = ds_concat[k].drop(["time_offset", "base_time"])
-    nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
+    if nexrad_columns is not None:
+        nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
     first_key = list(ds_concat.keys())[0]
     for k in list(ds_concat.keys())[1:]:
         for var in ds_concat[k].data_vars:
@@ -552,13 +554,14 @@ def radclss(
                 if verbose:
                     print(f"Dropping {var} from {k}")
                 ds_concat[k] = ds_concat[k].drop(var)
-
-    for var in nexrad_columns.data_vars:
-        for k in ds_concat.keys():
-            if var in ds_concat[k].data_vars:
-                if verbose:
-                    print(f"Dropping {var} from nexrad_columns")
-                nexrad_columns = nexrad_columns.drop(var)
+    
+    if nexrad_columns is not None:
+        for var in nexrad_columns.data_vars:
+            for k in ds_concat.keys():
+                if var in ds_concat[k].data_vars:
+                    if verbose:
+                        print(f"Dropping {var} from nexrad_columns")
+                    nexrad_columns = nexrad_columns.drop(var)
 
     ds_concat = xr.merge([x for x in ds_concat.values()])
     if verbose:
@@ -721,11 +724,11 @@ def radclss(
                         dict(
                             ground=volumes[k],
                             site=site,
-                            discard=discard_var["kazr2"],
+                            discard=discard_var[instrument],
                             column_time=ds.time,
                             column_height=ds["height"],
                             resample="mean",
-                            prefix="kazr2_",
+                            prefix=f"{instrument}_",
                         ),
                     )
                 )
