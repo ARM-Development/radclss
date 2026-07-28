@@ -1,11 +1,11 @@
-import act
-import sys
 import datetime
+import sys
+from datetime import timedelta
+
+import act
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import matplotlib.pyplot as plt
-
-from datetime import timedelta
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
@@ -57,8 +57,8 @@ def create_radclss_columns(
     if isinstance(radclss, str):
         try:
             ds = xr.open_dataset(radclss, decode_timedelta=False)
-        except Exception as e:
-            exc_type, exc_obj, exc_tb = sys.exc_info()
+        except Exception as e:  # noqa: BLE001
+            _exc_type, _exc_obj, exc_tb = sys.exc_info()
             # 'e' will contain the error object
             print(
                 "\nERROR - (create_radclss_timeseries):"
@@ -88,7 +88,7 @@ def create_radclss_columns(
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(
         np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
-    )
+    ).replace(tzinfo=datetime.timezone.utc)
     final_time = radar_time + timedelta(days=1)
     for i, station in enumerate(stations):
         row = i // 2
@@ -180,8 +180,8 @@ def create_radclss_rainfall_timeseries(
             ds = xr.open_dataset(radclss, decode_timedelta=False)
         elif isinstance(radclss, xr.Dataset):
             ds = radclss
-    except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
+    except Exception as e:  # noqa: BLE001
+        _exc_type, _exc_obj, exc_tb = sys.exc_info()
         # 'e' will contain the error object
         print(
             "\nERROR - (create_radclss_timeseries):"
@@ -196,7 +196,7 @@ def create_radclss_rainfall_timeseries(
     # Define the time of the radar file we are plotting against
     radar_time = datetime.datetime.strptime(
         np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
-    )
+    ).replace(tzinfo=datetime.timezone.utc)
     final_time = radar_time + timedelta(days=1)
 
     # -----------------------------------------------

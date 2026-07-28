@@ -10,26 +10,29 @@ OUTPUT_GATE_TIME_ATTRS = {
     ),
     "description": "Time in Seconds that Cooresponds to the Minimum Height Gate",
 }
-OUTPUT_TIME_OFFSET_ATTRS = dict(
-    long_name=("Time in Seconds Since Midnight"),
-    description=(
+OUTPUT_TIME_OFFSET_ATTRS = {
+    "long_name": ("Time in Seconds Since Midnight"),
+    "description": (
         "Time in Seconds Since Midnight that Cooresponds"
         + "to the Center of Each Height Gate"
         + "Above the Target Location "
     ),
-)
-OUTPUT_STATION_ATTRS = dict(
-    long_name="Bankhead National Forest AMF-3 In-Situ Ground Observation Station Identifers"
-)
-OUTPUT_LAT_ATTRS = dict(
-    long_name="Latitude of BNF AMF-3 Ground Observation Site", units="Degrees North"
-)
-OUTPUT_LON_ATTRS = dict(
-    long_name="Longitude of BNF AMF-3 Ground Observation Site", units="Degrees East"
-)
-OUTPUT_ALT_ATTRS = dict(
-    long_name="Altitude above mean sea level for each station", units="m"
-)
+}
+OUTPUT_STATION_ATTRS = {
+    "long_name": "Bankhead National Forest AMF-3 In-Situ Ground Observation Station Identifers"
+}
+OUTPUT_LAT_ATTRS = {
+    "long_name": "Latitude of BNF AMF-3 Ground Observation Site",
+    "units": "Degrees North",
+}
+OUTPUT_LON_ATTRS = {
+    "long_name": "Longitude of BNF AMF-3 Ground Observation Site",
+    "units": "Degrees East",
+}
+OUTPUT_ALT_ATTRS = {
+    "long_name": "Altitude above mean sea level for each station",
+    "units": "m",
+}
 
 
 def set_output_site(site):

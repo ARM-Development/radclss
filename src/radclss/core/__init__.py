@@ -12,6 +12,6 @@ This package contains the core functions for RadCLss.
 
 """
 
-from .radclss_core import radclss  # noqa: F401
+from .radclss_core import radclss
 
 __all__ = ["radclss"]

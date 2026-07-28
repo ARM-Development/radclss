@@ -1,6 +1,7 @@
-import radclss
-import xarray as xr
 import arm_test_data
+import xarray as xr
+
+import radclss
 
 
 def test_write():

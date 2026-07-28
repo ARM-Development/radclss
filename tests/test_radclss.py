@@ -1,12 +1,13 @@
-import radclss
-import arm_test_data
-import os
 import glob
-import xarray as xr
-import act
-import numpy as np
+import os
 
+import act
+import arm_test_data
+import numpy as np
+import xarray as xr
 from distributed import Client, LocalCluster
+
+import radclss
 
 
 def test_radclss_serial():
@@ -36,10 +37,9 @@ def test_radclss_serial():
             "2025-06-20T00:00:00",
             output=test_data_path,
         )
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     rad_path = os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")
     radar_files = sorted(glob.glob(rad_path))
@@ -214,10 +214,9 @@ def test_radclss_parallel():
             "2025-06-20T00:00:00",
             output=test_data_path,
         )
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     rad_path = os.path.join(test_data_path, "*bnfcsapr2cfrS3.a1*.nc")
     radar_files = sorted(glob.glob(rad_path))
@@ -473,10 +472,9 @@ def test_radclss_with_kasacr():
         )
 
     # Fetch any other test data
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     # Gather all the radar files
     csapr2_files = sorted(
@@ -618,10 +616,9 @@ def test_radclss_with_kazr():
         )
 
     # Fetch any other test data
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     # Gather all the radar files
     csapr2_files = sorted(
@@ -856,10 +853,9 @@ def test_radclss_parallel_with_kasacr():
         )
 
     # Fetch any other test data
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     # Gather all the radar files
     csapr2_files = sorted(
@@ -959,10 +955,9 @@ def test_match_datasets_act():
     radclss_file = arm_test_data.DATASETS.fetch(
         "bnfcsapr2radclss.c2.20250619.000000.nc"
     )
-    for files in arm_test_data.DATASETS.registry.keys():
-        if "bnf" in files:
-            if not os.path.exists(os.path.join(test_data_path, files)):
-                arm_test_data.DATASETS.fetch(files)
+    for files in arm_test_data.DATASETS.registry:
+        if "bnf" in files and not os.path.exists(os.path.join(test_data_path, files)):
+            arm_test_data.DATASETS.fetch(files)
 
     met_M1_files = glob.glob(os.path.join(test_data_path, "*bnfmetM1.b1*"))
     radclss_ds = xr.open_dataset(radclss_file)
