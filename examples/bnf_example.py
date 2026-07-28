@@ -12,12 +12,13 @@ The script processes data from the BNF (Bankhead National Forest) site for a sin
 combining radar volumes with ground stations at multiple locations (M1, S4, S20, S30, S40, S13).
 """
 
-import radclss
 import glob
-import matplotlib.pyplot as plt
 import os
 
+import matplotlib.pyplot as plt
 from dask.distributed import Client, LocalCluster
+
+import radclss
 
 
 def main():
@@ -67,7 +68,7 @@ def main():
 
     for vars in my_columns.data_vars:
         print(vars, my_columns[vars].dtype)
-    fig, ax = radclss.vis.create_radclss_columns("radclss_example.nc")
+    fig, _ax = radclss.vis.create_radclss_columns("radclss_example.nc")
     print(fig)
     plt.show()
 

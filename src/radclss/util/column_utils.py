@@ -1,18 +1,19 @@
-import boto3
-import pyart
-import act
-import numpy as np
-import xarray as xr
-import pandas as pd
 import datetime
 import logging
-
 from datetime import timedelta
-from botocore.config import Config
-from botocore import UNSIGNED
 
-from ..config import DEFAULT_DISCARD_VAR, DEFAULT_NEXRAD_RADARS
-from ..config import get_output_config
+import act
+import boto3
+import numpy as np
+import pandas as pd
+import pyart
+import xarray as xr
+from botocore import UNSIGNED
+from botocore.config import Config
+
+from ..config import DEFAULT_DISCARD_VAR, DEFAULT_NEXRAD_RADARS, get_output_config
+
+logger = logging.getLogger(__name__)
 
 _sonde_cache = {}
 _nexrad_cache = {}
@@ -28,7 +29,7 @@ def _read_sonde_cached(path, exclude):
 
 
 def _read_nexrad_cache(path):
-    if path not in _nexrad_cache.keys():
+    if path not in _nexrad_cache:
         raw = pyart.io.read_nexrad_archive(path)
         _nexrad_cache[path] = raw
         # Only maintain 15 files in the cache to save memory
@@ -42,7 +43,7 @@ def _grab_90_degree_rays(radar):
     """Special case for column right over the radar in an RHI"""
     # Get the rays within 0.5 degrees of 90 degrees
     ray = np.argmin(np.abs(radar.elevation["data"] - 90.0))
-    moment = {key: [] for key in radar.fields.keys()}
+    moment = {key: [] for key in radar.fields}
     # Determine the center of each gate for the subsetted rays.
     rhi_z = radar.range["data"]
 
@@ -71,10 +72,10 @@ def _grab_90_degree_rays(radar):
     ]
     # Convert the moment dictionary to xarray DataArray.
     # Apply radar object meta data to DataArray attribute
-    for key in moment:
+    for key, value in moment.items():
         if key != "height":
             da = xr.DataArray(
-                moment[key], coords=dict(height=zgate), name=key, dims=["height"]
+                value, coords={"height": zgate}, name=key, dims=["height"]
             )
             for tag in da_meta:
                 if tag in radar.fields[key]:
@@ -86,7 +87,7 @@ def _grab_90_degree_rays(radar):
     # if not present within the radar object.
     da_base = xr.DataArray(base_time, name="base_time")
     da_offset = xr.DataArray(
-        combined_time, coords=dict(height=zgate), name="time_offset", dims=["height"]
+        combined_time, coords={"height": zgate}, name="time_offset", dims=["height"]
     )
     ds_container.append(da_base.to_dataset(name="base_time"))
     ds_container.append(da_offset.to_dataset(name="time_offset"))
@@ -158,7 +159,7 @@ def _vpt_to_column_timeseries(radar, height_bins):
         data_vars[key] = xr.DataArray(arr, dims=["time", "height"], attrs=attrs)
 
     ds = xr.Dataset(data_vars, coords={"height": zgate, "time": abs_times})
-    #ds = ds.dropna("height")
+    # ds = ds.dropna("height")
     valid_h = np.isfinite(ds["height"])
     print(ds["reflectivity"], np.sum(np.isnan(ds["reflectivity"].values)))
     if int(valid_h.sum()) > 0:
@@ -232,8 +233,7 @@ def _vpt_nan_fill(radar, height_bins):
             attrs=attrs,
         )
 
-    ds = xr.Dataset(data_vars, 
-            coords={"height": height_bins, "time": abs_times})
+    ds = xr.Dataset(data_vars, coords={"height": height_bins, "time": abs_times})
     ds = ds.drop_duplicates("time", keep="first")
 
     dedup_times_s = ds["time"].values.astype("datetime64[s]")
@@ -263,7 +263,7 @@ def get_nexrad_column(
     rad_time,
     site,
     input_site_dict,
-    height_bins=np.arange(500, 8500, 250),
+    height_bins=None,
     nexrad_radar=None,
 ):
     """
@@ -282,8 +282,9 @@ def get_nexrad_column(
         {'site1': [lat1, lon1, alt1],
         'site2': [lat2, lon2, alt2],
         ...}
-    height_bins: numpy array
-        The height bins in meters to provide the column over.
+    height_bins: numpy array or None
+        The height bins in meters to provide the column over. Defaults to
+        ``np.arange(500, 8500, 250)`` when None.
     nexrad_radar: str or None
         The NEXRAD radar to obtain the column from. Setting to None will use
         the default setting for the ARM site.
@@ -294,8 +295,11 @@ def get_nexrad_column(
         An xarray dataset containing the matched columns from the NEXRAD data.
 
     """
+    if height_bins is None:
+        height_bins = np.arange(500, 8500, 250)
+
     if nexrad_radar is None:
-        if site.lower() in DEFAULT_NEXRAD_RADARS.keys():
+        if site.lower() in DEFAULT_NEXRAD_RADARS:
             nexrad_radar = DEFAULT_NEXRAD_RADARS[site.lower()]
         else:
             raise UserWarning(
@@ -303,11 +307,13 @@ def get_nexrad_column(
             )
             return None
 
-    lats = list([x[0] for x in input_site_dict.values()])
-    lons = list([x[1] for x in input_site_dict.values()])
-    site_alt = list([x[2] for x in input_site_dict.values()])
+    lats = [x[0] for x in input_site_dict.values()]
+    lons = [x[1] for x in input_site_dict.values()]
+    site_alt = [x[2] for x in input_site_dict.values()]
     sites = list(input_site_dict.keys())
-    right_now = datetime.datetime.strptime(rad_time, "%Y-%m-%dT%H:%M:%S")
+    right_now = datetime.datetime.strptime(rad_time, "%Y-%m-%dT%H:%M:%S").replace(
+        tzinfo=datetime.timezone.utc
+    )
     yesterday = right_now - timedelta(days=1)
     year = right_now.year
     month = right_now.month
@@ -333,7 +339,9 @@ def get_nexrad_column(
             continue
         else:
             time_list.append(
-                datetime.datetime.strptime(name, f"{nexrad_radar}%Y%m%d_%H%M%S_V06")
+                datetime.datetime.strptime(
+                    name, f"{nexrad_radar}%Y%m%d_%H%M%S_V06"
+                ).replace(tzinfo=datetime.timezone.utc)
             )
 
     time_list = np.array(time_list)
@@ -366,9 +374,7 @@ def get_nexrad_column(
                         .interp(height=height_bins)
                     )
             else:
-                target_height = xr.DataArray(
-                    height_bins, dims="height", name="height"
-                )
+                target_height = xr.DataArray(height_bins, dims="height", name="height")
                 da = da.reindex(height=target_height)
 
             # Add the latitude and longitude of the extracted column
@@ -395,7 +401,7 @@ def subset_points(
     nfile,
     input_site_dict,
     sonde=None,
-    height_bins=np.arange(500, 8500, 250),
+    height_bins=None,
     rad_key="radar_csapr2",
     **kwargs,
 ):
@@ -419,7 +425,8 @@ def subset_points(
         radar start time will be used. Default is None.
     height_bins : numpy array, optional
         Numpy array containing the desired height bins to interpolate
-        the extracted radar columns to. Default is np.arange(500, 8500, 250).
+        the extracted radar columns to. Defaults to
+        ``np.arange(500, 8500, 250)`` when None.
     rad_key: str
         The radar key to use for dropping select variables from the column
         statistics.
@@ -432,19 +439,22 @@ def subset_points(
         Xarray Dataset containing the radar column above a give set of locations
 
     """
+    if height_bins is None:
+        height_bins = np.arange(500, 8500, 250)
+
     ds = None
 
     # Define the splash locations [lon,lat]
 
-    lats = list([x[0] for x in input_site_dict.values()])
-    lons = list([x[1] for x in input_site_dict.values()])
-    site_alt = list([x[2] for x in input_site_dict.values()])
+    lats = [x[0] for x in input_site_dict.values()]
+    lons = [x[1] for x in input_site_dict.values()]
+    site_alt = [x[2] for x in input_site_dict.values()]
 
     sites = list(input_site_dict.keys())
     try:
         radar = pyart.io.read(nfile, exclude_fields=DEFAULT_DISCARD_VAR[rad_key])
     except OSError:
-        logging.warning(
+        logger.warning(
             f"{nfile} failed to open and is possibly corrupt."
             + "RadCLss will not generate a column for this file."
         )
@@ -472,14 +482,14 @@ def subset_points(
                     + "."
                     + nfile.split("/")[-1].split(".")[-2],
                     "%Y%m%d.%H%M%S",
-                )
+                ).replace(tzinfo=datetime.timezone.utc)
                 sonde_start = [
                     datetime.datetime.strptime(
                         xfile.split("/")[-1].split(".")[2]
                         + "-"
                         + xfile.split("/")[-1].split(".")[3],
                         "%Y%m%d-%H%M%S",
-                    )
+                    ).replace(tzinfo=datetime.timezone.utc)
                     for xfile in sonde
                 ]
                 # difference in time between radar file and each sonde file
@@ -495,7 +505,7 @@ def subset_points(
                         z_dict, sonde_dict = pyart.retrieve.map_profile_to_gates(
                             ds_sonde.variables[var], ds_sonde.variables["alt"], radar
                         )
-                    field_name = list(radar.fields.keys())[0]
+                    field_name = next(iter(radar.fields.keys()))
                     # add the field to the radar file
                     radar.add_field_like(
                         field_name,
@@ -547,8 +557,8 @@ def subset_points(
                             if radar.metadata["facility_id"] == site:
                                 try:
                                     da = _grab_90_degree_rays(radar)
-                                except Exception:
-                                    logging.warning(
+                                except Exception:  # noqa: BLE001
+                                    logger.warning(
                                         f"Failed to grab 90 degree rays for {site} from {nfile}."
                                         + "NaNs will be returned for this column."
                                     )
@@ -574,15 +584,13 @@ def subset_points(
                         try:
                             da = da_clean.interp(height=height_bins)
                         except pd.errors.InvalidIndexError:
-                            da_clean = da_clean.drop_duplicates(
-                                "height", keep="first"
-                            )
+                            da_clean = da_clean.drop_duplicates("height", keep="first")
                             da = da_clean.interp(height=height_bins)
                             time_offset = time_offset.drop_duplicates(
                                 "height", keep="first"
                             )
                         interpolated = True
-                
+
                 if not interpolated:
                     target_height = xr.DataArray(
                         height_bins, dims="height", name="height"
@@ -691,7 +699,7 @@ def _prepare_match(
             "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
         )
 
-    matched = matched.assign_coords(coords=dict(station=site))
+    matched = matched.assign_coords(coords={"station": site})
     matched = matched.expand_dims("station")
 
     for attr in ("lat", "lon", "alt"):

@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import xarray as xr
-from unittest.mock import patch, MagicMock
+
 from radclss.util.column_utils import get_nexrad_column
 
 

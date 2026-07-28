@@ -80,7 +80,7 @@ DEFAULT_DISCARD_VAR = {
         "normalized_coherent_power",
         "normalized_coherent_power_v",
     ],
-     "radar_xsapr": [
+    "radar_xsapr": [
         "classification_mask",
         "censor_mask",
         "uncorrected_copol_correlation_coeff",
@@ -96,7 +96,7 @@ DEFAULT_DISCARD_VAR = {
         "signal_to_noise_ratio_copolar_v",
         "normalized_coherent_power",
         "normalized_coherent_power_v",
-        "radar_echo_classification"
+        "radar_echo_classification",
     ],
     "met": [
         "base_time",
@@ -244,5 +244,4 @@ def set_discarded_variables(instrument, var_list):
     var_list : list
         List of variable names to discard.
     """
-    global DEFAULT_DISCARD_VAR
     DEFAULT_DISCARD_VAR[instrument] = var_list

@@ -1,21 +1,23 @@
 import logging
 import time
-import xarray as xr
+import traceback
+
 import act
 import numpy as np
 import pandas as pd
-import traceback
+import xarray as xr
+from dask.distributed import Client, as_completed
 
-
-from ..util.column_utils import (
-    subset_points,
-    get_nexrad_column,
-    _prepare_match,
-    _apply_match,
-)
 from ..config.default_config import DEFAULT_DISCARD_VAR
 from ..config.output_config import get_output_config
-from dask.distributed import Client, as_completed
+from ..util.column_utils import (
+    _apply_match,
+    _prepare_match,
+    get_nexrad_column,
+    subset_points,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def radclss(
@@ -24,13 +26,13 @@ def radclss(
     time_coords,
     serial=True,
     dod_version="1.0",
-    discard_var={},
+    discard_var=None,
     verbose=False,
     base_station="M1",
     current_client=None,
     nexrad=True,
     nexrad_site=None,
-    height_bins=np.arange(500, 8500, 250),
+    height_bins=None,
 ):
     """
     Extracted Radar Columns and In-Situ Sensors
@@ -71,7 +73,8 @@ def radclss(
         Option to supply a Data Object Description version to verify standards.
         If this is an empty string, then the latest version will be used. Default is '1.0'.
     discard_var : dict, optional
-        Dictionary containing variables to drop from each datastream. Default is {}.
+        Dictionary containing variables to drop from each datastream. Default is None,
+        which uses the default discard variables for each instrument.
     verbose : bool, optional
         Option to print additional information during processing. Default is False.
     base_station : str, optional
@@ -86,7 +89,7 @@ def radclss(
         Set to None to use the default settings in RadCLss. Default is None.
     height_bins : numpy.ndarray, optional
         The height bins in meters to provide the column over.
-        Default is np.arange(500, 8500, 250).
+        Default is None, which uses np.arange(500, 8500, 250).
 
     Returns
     -------
@@ -94,10 +97,13 @@ def radclss(
         Daily time-series of extracted columns saved into ARM formatted netCDF files.
     """
 
-    if discard_var == {}:
+    if discard_var is None:
         discard_var = DEFAULT_DISCARD_VAR
 
-    if "sonde" not in volumes.keys():
+    if height_bins is None:
+        height_bins = np.arange(500, 8500, 250)
+
+    if "sonde" not in volumes:
         volumes["sonde"] = None
 
     if verbose:
@@ -116,7 +122,7 @@ def radclss(
         print("-" * 80)
 
     if "radar" in time_coords:
-        if time_coords not in volumes.keys():
+        if time_coords not in volumes:
             raise IndexError(
                 f"{time_coords} is not a valid time basis! Please choose a radar or an "
                 + "Interval"
@@ -141,7 +147,7 @@ def radclss(
                 raise RuntimeError(
                     "No Dask client found. Please start a Dask client before running in parallel mode."
                 )
-        for k in volumes.keys():
+        for k in volumes:
             if "radar" in k:
                 if verbose:
                     print(f"\nProcessing radar: {k}")
@@ -167,7 +173,7 @@ def radclss(
                             print(
                                 f"  Completed {successful_count}/{len(volumes[k])} files..."
                             )
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         failed_count += 1
                         if verbose:
                             print(
@@ -179,15 +185,13 @@ def radclss(
                         f"  Finished {k}: {successful_count} successful, {failed_count} failed"
                     )
     else:
-        for k in volumes.keys():
+        for k in volumes:
             if "radar" in k:
                 if verbose:
                     print(f"\nProcessing radar: {k}")
                     print(f"  Number of files: {len(volumes[k])}")
                 columns[k] = []
-                file_count = 0
-                for rad in volumes[k]:
-                    file_count += 1
+                for file_count, rad in enumerate(volumes[k], 1):
                     if verbose:
                         print(
                             f"  [{file_count}/{len(volumes[k])}] Processing: {rad.split('/')[-1]}"
@@ -202,7 +206,7 @@ def radclss(
                         )
                         columns[k].append(result)
 
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         result = None
                         if verbose:
                             traceback.print_exc()
@@ -233,15 +237,15 @@ def radclss(
     nexrad_columns = []
     min_times = {}
     max_times = {}
-    for k in columns.keys():
-        if "radar" in k and len(columns[k]) > 0:
+    for k, v in columns.items():
+        if "radar" in k and len(v) > 0:
             times = np.array(
-                [x["base_time"].values.flat[0] for x in columns[k] if x is not None]
+                [x["base_time"].values.flat[0] for x in v if x is not None]
             )
             min_times[k] = np.min(times)
             max_times[k] = np.max(times)
             if verbose:
-                print(f"  {k}: {len(columns[k])} columns")
+                print(f"  {k}: {len(v)} columns")
                 print(f"    Time range: {min_times[k]} to {max_times[k]}")
 
     min_time = min(np.array([x for x in min_times.values()]))
@@ -321,13 +325,13 @@ def radclss(
                         print(
                             f"  Completed {successful_count}/{len(time_list)} NEXRAD columns..."
                         )
-                except Exception as error:
+                except Exception:
                     failed_count += 1
                     if verbose:
                         print(
                             f"  ERROR fetching NEXRAD data (total failures: {failed_count})"
                         )
-                    logging.exception(error)
+                    logger.exception("Error fetching NEXRAD data")
 
             if verbose:
                 print(
@@ -356,13 +360,13 @@ def radclss(
                         print(
                             f"  Completed {successful_count}/{len(time_list)} NEXRAD columns..."
                         )
-                except Exception as error:
+                except Exception:
                     failed_count += 1
                     if verbose:
                         print(
                             f"  ERROR fetching NEXRAD data (total failures: {failed_count})"
                         )
-                    logging.exception(error)
+                    logger.exception("Error fetching NEXRAD data")
 
         if verbose:
             valid_nexrad = sum(1 for x in nexrad_columns if x is not None)
@@ -387,10 +391,10 @@ def radclss(
     # memory at once before being folded into an intermediate result.
     _CONCAT_CHUNK = 50
     ds_concat = {}
-    for k in columns.keys():
+    for k, v in columns.items():
         if verbose:
             print(f"  Processing {k}...")
-        valid = [data for data in columns[k] if data is not None]
+        valid = [data for data in v if data is not None]
         # Non-VPT datasets have no 'time' dimension; VPT datasets do.
         # Expand non-VPT datasets so all entries have a consistent 'time'
         # coordinate before concatenation.
@@ -444,11 +448,11 @@ def radclss(
         if verbose:
             print(f"  Reindexing all datasets to {time_coords} time coordinates")
             print(f"    Reference time steps: {len(ds_concat[time_coords]['time'])}")
-        for k in ds_concat.keys():
-            if not k == time_coords:
+        for k, v in ds_concat.items():
+            if k != time_coords:
                 if verbose:
                     print(f"    Reindexing {k}...")
-                ds_concat[k] = ds_concat[k].reindex(
+                ds_concat[k] = v.reindex(
                     time=ds_concat[time_coords]["time"], method="nearest"
                 )
 
@@ -462,17 +466,15 @@ def radclss(
         if verbose:
             print("  Reindexing all datasets to NEXRAD time coordinates")
             print(f"    Reference time steps: {len(nexrad_columns['time'])}")
-        for k in ds_concat.keys():
+        for k, v in ds_concat.items():
             if verbose:
                 print(f"    Reindexing {k}...")
-            ds_concat[k] = ds_concat[k].reindex(
-                time=nexrad_columns["time"], method="nearest"
-            )
+            ds_concat[k] = v.reindex(time=nexrad_columns["time"], method="nearest")
     elif _is_valid_offset(time_coords):
         if verbose:
             print(f"  Resampling to {time_coords} intervals")
-        for k in ds_concat.keys():
-            ds_concat[k] = ds_concat[k].resample(time=time_coords).mean()
+        for k, v in ds_concat.items():
+            ds_concat[k] = v.resample(time=time_coords).mean()
         if nexrad:
             nexrad_columns = nexrad_columns.resample(time=time_coords).mean()
 
@@ -480,14 +482,16 @@ def radclss(
         new_coordinates = pd.date_range(min_time, max_time, freq=time_coords)
         if verbose:
             print(f"    Creating new time grid: {len(new_coordinates)} time steps")
-        for k in ds_concat.keys():
-            ds_concat[k] = ds_concat[k].reindex(time=new_coordinates, method='nearest')
-            
+        for k, v in ds_concat.items():
+            ds_concat[k] = v.reindex(time=new_coordinates, method="nearest")
+
         if nexrad:
-            nexrad_columns = nexrad_columns.reindex(time=new_coordinates, method='nearest')
+            nexrad_columns = nexrad_columns.reindex(
+                time=new_coordinates, method="nearest"
+            )
     else:
-        for k in ds_concat.keys():
-            ds_concat[k] = ds_concat[k].reindex(time=ds_times, method="nearest")
+        for k, v in ds_concat.items():
+            ds_concat[k] = v.reindex(time=ds_times, method="nearest")
         if nexrad:
             nexrad_columns = nexrad_columns.reindex(time=ds_times, method="nearest")
 
@@ -497,68 +501,73 @@ def radclss(
         print("STEP 6: Renaming variables and merging datasets")
         print("=" * 80)
 
-    for k in ds_concat.keys():
+    for k, v in ds_concat.items():
         radar_name = k.split("_")[1:]
         if verbose:
             print(f"  Renaming {k} variables with prefix: {'_'.join(radar_name)}_")
-        for var in ds_concat[k].data_vars:
-            if var not in [
-                "time",
-                "time_offset",
-                "base_time",
-                "height",
-                "lat",
-                "lon",
-                "alt",
-                "latitude",
-                "longitude",
-            ]:
-                if "sonde_" not in var:
-                    ds_concat[k] = ds_concat[k].rename_vars(
-                        {var: f"{radar_name[0]}_{var}"}
-                    )
+        for var in v.data_vars:
+            if (
+                var
+                not in [
+                    "time",
+                    "time_offset",
+                    "base_time",
+                    "height",
+                    "lat",
+                    "lon",
+                    "alt",
+                    "latitude",
+                    "longitude",
+                ]
+                and "sonde_" not in var
+            ):
+                v = v.rename_vars({var: f"{radar_name[0]}_{var}"})
+        ds_concat[k] = v
 
     if nexrad_columns is not None:
         if verbose:
             print("  Renaming NEXRAD variables with prefix: nexrad_")
         for var in nexrad_columns.data_vars:
-            if var not in [
-                "time",
-                "time_offset",
-                "base_time",
-                "height",
-                "lat",
-                "lon",
-                "alt",
-                "latitude",
-                "longitude",
-            ]:
-                if "sonde_" not in var:
-                    nexrad_columns = nexrad_columns.rename_vars({var: f"nexrad_{var}"})
+            if (
+                var
+                not in [
+                    "time",
+                    "time_offset",
+                    "base_time",
+                    "height",
+                    "lat",
+                    "lon",
+                    "alt",
+                    "latitude",
+                    "longitude",
+                ]
+                and "sonde_" not in var
+            ):
+                nexrad_columns = nexrad_columns.rename_vars({var: f"nexrad_{var}"})
 
     if verbose:
         print(f"  Merging {len(ds_concat)} radar datasets...")
 
     # Drop time_offset since we won't need it until we write the final dataset
-    for k in ds_concat.keys():
+    for k, v in ds_concat.items():
         if verbose:
             print(f" Time arrays from {k}:")
 
-        ds_concat[k] = ds_concat[k].drop(["time_offset", "base_time"])
+        ds_concat[k] = v.drop(["time_offset", "base_time"])
     if nexrad_columns is not None:
         nexrad_columns = nexrad_columns.drop(["time_offset", "base_time"])
-    first_key = list(ds_concat.keys())[0]
+    first_key = next(iter(ds_concat.keys()))
     for k in list(ds_concat.keys())[1:]:
         for var in ds_concat[k].data_vars:
             if var in ds_concat[first_key].data_vars:
                 if verbose:
                     print(f"Dropping {var} from {k}")
                 ds_concat[k] = ds_concat[k].drop(var)
-    
+
     if nexrad_columns is not None:
         for var in nexrad_columns.data_vars:
-            for k in ds_concat.keys():
-                if var in ds_concat[k].data_vars:
+            for k, v in ds_concat.items():
+                if var in v.data_vars:
                     if verbose:
                         print(f"Dropping {var} from nexrad_columns")
                     nexrad_columns = nexrad_columns.drop(var)
@@ -619,58 +628,58 @@ def radclss(
         print("=" * 80)
 
     for var in ds_concat.data_vars:
-        if var not in ["time", "time_offset", "base_time", "lat", "lon", "alt"]:
-            if var in ds.data_vars:
-                if verbose:
-                    print(f"Adding variable to output dataset: {var}")
-                    print(
-                        f"Original dtype: {ds[var].dtype}, New dtype: {ds_concat[var].dtype}"
-                    )
-                old_type = ds[var].dtype
+        if (
+            var not in ["time", "time_offset", "base_time", "lat", "lon", "alt"]
+            and var in ds.data_vars
+        ):
+            if verbose:
+                print(f"Adding variable to output dataset: {var}")
+                print(
+                    f"Original dtype: {ds[var].dtype}, New dtype: {ds_concat[var].dtype}"
+                )
+            old_type = ds[var].dtype
 
-                # Assign data and convert to original dtype
-                ds[var][:] = ds_concat[var][:]
-                ds[var] = ds[var].astype(old_type)
-                if "_FillValue" in ds[var].attrs:
-                    if isinstance(ds[var].attrs["_FillValue"], str):
-                        if ds[var].dtype == "float32":
-                            ds[var].attrs["_FillValue"] = np.float32(
-                                ds[var].attrs["_FillValue"]
-                            )
-                        elif ds[var].dtype == "float64":
-                            ds[var].attrs["_FillValue"] = np.float64(
-                                ds[var].attrs["_FillValue"]
-                            )
-                        elif ds[var].dtype == "int32":
-                            ds[var].attrs["_FillValue"] = np.int32(
-                                ds[var].attrs["_FillValue"]
-                            )
-                        elif ds[var].dtype == "int64":
-                            ds[var].attrs["_FillValue"] = np.int64(
-                                ds[var].attrs["_FillValue"]
-                            )
-                    ds[var] = ds[var].fillna(ds[var].attrs["_FillValue"]).astype(float)
-                if "missing_value" in ds[var].attrs:
-                    if isinstance(ds[var].attrs["missing_value"], str):
-                        if ds[var].dtype == "float32":
-                            ds[var].attrs["missing_value"] = np.float32(
-                                ds[var].attrs["missing_value"]
-                            )
-                        elif ds[var].dtype == "float64":
-                            ds[var].attrs["missing_value"] = np.float64(
-                                ds[var].attrs["missing_value"]
-                            )
-                        elif ds[var].dtype == "int32":
-                            ds[var].attrs["missing_value"] = np.int32(
-                                ds[var].attrs["missing_value"]
-                            )
-                        elif ds[var].dtype == "int64":
-                            ds[var].attrs["missing_value"] = np.int64(
-                                ds[var].attrs["missing_value"]
-                            )
-                    ds[var] = (
-                        ds[var].fillna(ds[var].attrs["missing_value"]).astype(float)
-                    )
+            # Assign data and convert to original dtype
+            ds[var][:] = ds_concat[var][:]
+            ds[var] = ds[var].astype(old_type)
+            if "_FillValue" in ds[var].attrs:
+                if isinstance(ds[var].attrs["_FillValue"], str):
+                    if ds[var].dtype == "float32":
+                        ds[var].attrs["_FillValue"] = np.float32(
+                            ds[var].attrs["_FillValue"]
+                        )
+                    elif ds[var].dtype == "float64":
+                        ds[var].attrs["_FillValue"] = np.float64(
+                            ds[var].attrs["_FillValue"]
+                        )
+                    elif ds[var].dtype == "int32":
+                        ds[var].attrs["_FillValue"] = np.int32(
+                            ds[var].attrs["_FillValue"]
+                        )
+                    elif ds[var].dtype == "int64":
+                        ds[var].attrs["_FillValue"] = np.int64(
+                            ds[var].attrs["_FillValue"]
+                        )
+                ds[var] = ds[var].fillna(ds[var].attrs["_FillValue"]).astype(float)
+            if "missing_value" in ds[var].attrs:
+                if isinstance(ds[var].attrs["missing_value"], str):
+                    if ds[var].dtype == "float32":
+                        ds[var].attrs["missing_value"] = np.float32(
+                            ds[var].attrs["missing_value"]
+                        )
+                    elif ds[var].dtype == "float64":
+                        ds[var].attrs["missing_value"] = np.float64(
+                            ds[var].attrs["missing_value"]
+                        )
+                    elif ds[var].dtype == "int32":
+                        ds[var].attrs["missing_value"] = np.int32(
+                            ds[var].attrs["missing_value"]
+                        )
+                    elif ds[var].dtype == "int64":
+                        ds[var].attrs["missing_value"] = np.int64(
+                            ds[var].attrs["missing_value"]
+                        )
+                ds[var] = ds[var].fillna(ds[var].attrs["missing_value"]).astype(float)
 
     # Remove all the unused CMAC variables
     # Drop duplicate latitude and longitude
@@ -721,15 +730,15 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var[instrument],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                            prefix=f"{instrument}_",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var[instrument],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                            "prefix": f"{instrument}_",
+                        },
                     )
                 )
             elif instrument == "met":
@@ -737,14 +746,14 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k][0],
-                            site=site,
-                            discard=discard_var["met"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                        ),
+                        {
+                            "ground": volumes[k][0],
+                            "site": site,
+                            "discard": discard_var["met"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                        },
                     )
                 )
             elif instrument == "pluvio":
@@ -752,14 +761,14 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var["pluvio"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="sum",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var["pluvio"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "sum",
+                        },
                     )
                 )
             elif instrument == "ld":
@@ -767,15 +776,15 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var["ldquants"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                            prefix="ldquants_",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var["ldquants"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                            "prefix": "ldquants_",
+                        },
                     )
                 )
             elif instrument == "vd":
@@ -783,15 +792,15 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var["vdisquants"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                            prefix="vdisquants_",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var["vdisquants"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                            "prefix": "vdisquants_",
+                        },
                     )
                 )
             elif instrument == "wxt":
@@ -799,15 +808,15 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var["wxt"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                            prefix="wxt_",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var["wxt"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                            "prefix": "wxt_",
+                        },
                     )
                 )
             elif instrument == "sonde":
@@ -815,15 +824,15 @@ def radclss(
                     (
                         k,
                         site,
-                        dict(
-                            ground=volumes[k],
-                            site=site,
-                            discard=discard_var["sonde"],
-                            column_time=ds.time,
-                            column_height=ds["height"],
-                            resample="mean",
-                            prefix="sonde_",
-                        ),
+                        {
+                            "ground": volumes[k],
+                            "site": site,
+                            "discard": discard_var["sonde"],
+                            "column_time": ds.time,
+                            "column_height": ds["height"],
+                            "resample": "mean",
+                            "prefix": "sonde_",
+                        },
                     )
                 )
 

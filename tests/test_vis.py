@@ -1,7 +1,8 @@
-import pytest
-import radclss
 import arm_test_data
+import pytest
 import xarray as xr
+
+import radclss
 
 
 @pytest.mark.mpl_image_compare
