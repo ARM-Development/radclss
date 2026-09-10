@@ -1,12 +1,50 @@
-import datetime
 import sys
-from datetime import timedelta
 
 import act
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+
+def _daily_time_window(times):
+    """
+    Determine the 24 hour window a RadCLss file represents.
+
+    A RadCLss file holds the radar volumes belonging to a single processing
+    day, but the first volume of that day routinely *starts* a few minutes
+    before midnight (the NSA XSAPR volume beginning 23:58:03 UTC belongs to
+    the following day's file).  Anchoring on ``time[0]`` therefore selects
+    the previous calendar day and discards nearly every sample, so the day is
+    taken from the timestamp the bulk of the samples fall on and then widened
+    to keep any pre-midnight leader and post-midnight tail.
+
+    Input
+    -----
+    times : array-like of numpy.datetime64
+        Time coordinate of the RadCLss dataset.
+
+    Output
+    ------
+    start : numpy.datetime64
+        Start of the plotting window.
+    end : numpy.datetime64
+        End of the plotting window.
+    ref_day : numpy.datetime64
+        Midnight of the day the file represents, as a ``datetime64[D]``.
+
+    """
+    times = np.asarray(times, dtype="datetime64[s]")
+    if times.size == 0:
+        raise ValueError(
+            "\nERROR - (_daily_time_window):"
+            + " \n\tRadCLss dataset has an empty time coordinate.\n"
+        )
+    days, counts = np.unique(times.astype("datetime64[D]"), return_counts=True)
+    ref_day = days[np.argmax(counts)]
+    start = min(ref_day.astype("datetime64[s]"), times.min())
+    end = max((ref_day + 1).astype("datetime64[s]"), times.max())
+    return start, end, ref_day
 
 
 def create_radclss_columns(
@@ -85,22 +123,16 @@ def create_radclss_columns(
     fig, axarr = plt.subplots(nrows, ncols, figsize=(width, height))
     plt.subplots_adjust(hspace=0.8)
 
-    # Define the time of the radar file we are plotting against
-    radar_time = datetime.datetime.strptime(
-        np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
-    ).replace(tzinfo=datetime.timezone.utc)
-    final_time = radar_time + timedelta(days=1)
+    # Define the window of the radar file we are plotting against
+    start_time, end_time, _ = _daily_time_window(ds["time"].data)
     for i, station in enumerate(stations):
         row = i // 2
         col = i % 2
         if len(axarr.shape) == 1:
             axarr = np.expand_dims(axarr, axis=0)
-        ds[field].sel(station=station).sel(
-            time=slice(
-                radar_time.strftime("%Y-%m-%dT00:00:00"),
-                final_time.strftime("%Y-%m-%dT00:00:00"),
-            )
-        ).plot(y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs)
+        ds[field].sel(station=station).sel(time=slice(start_time, end_time)).plot(
+            y="height", ax=axarr[row, col], vmin=vmin, vmax=vmax, **kwargs
+        )
         long_name = ds[field].attrs.get("long_name", field)
         axarr[row, col].set_title(f"{station} {long_name}")
 
@@ -193,11 +225,8 @@ def create_radclss_rainfall_timeseries(
         print("\n")
         return
 
-    # Define the time of the radar file we are plotting against
-    radar_time = datetime.datetime.strptime(
-        np.datetime_as_string(ds["time"].data[0], unit="s"), "%Y-%m-%dT%H:%M:%S"
-    ).replace(tzinfo=datetime.timezone.utc)
-    final_time = radar_time + timedelta(days=1)
+    # Define the window of the radar file we are plotting against
+    start_time, end_time, ref_day = _daily_time_window(ds["time"].data)
 
     # -----------------------------------------------
     # Side Plot A - Display the RadClss Radar Field
@@ -214,6 +243,7 @@ def create_radclss_rainfall_timeseries(
     )
     ax2.set_ylabel("Height [m]")
     ax2.set_xlabel("Time [UTC]")
+    ax2.set_xlim([start_time, end_time])
 
     # --------------------------------------
     # Side Plot B - Display the Rain Rates
@@ -237,12 +267,7 @@ def create_radclss_rainfall_timeseries(
     ax3.set_title(" ")
     ax3.set_ylabel("Precipitation Rate \n[mm/hr]")
     ax3.set_xlabel("Time [UTC]")
-    ax3.set_xlim(
-        [
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        ]
-    )
+    ax3.set_xlim([start_time, end_time])
     ax3.legend(loc="upper right")
     ax3.grid(True)
     ax3.set_ylim(rr_min, rr_max)
@@ -282,12 +307,7 @@ def create_radclss_rainfall_timeseries(
     ax4.set_xlabel("Time [UTC]")
     ax4.legend(loc="upper left")
     ax4.grid(True)
-    ax4.set_xlim(
-        [
-            radar_time.strftime("%Y-%m-%dT00:00:00"),
-            final_time.strftime("%Y-%m-%dT00:00:00"),
-        ]
-    )
+    ax4.set_xlim([start_time, end_time])
     ax4.set_ylim(cum_min, cum_max)
     # Add a blank space next to the subplot to shape it as the above plot
     divider = make_axes_locatable(ax4)
@@ -302,7 +322,7 @@ def create_radclss_rainfall_timeseries(
     if title_flag is True:
         plt.suptitle(
             "BNF Extracted Radar Columns and In-Situ Sensors (RadCLss) \n"
-            + radar_time.strftime("%Y-%m-%d")
+            + str(ref_day)
         )
 
     # Clean up this function
