@@ -1,9 +1,15 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pandas as pd
+import pytest
 import xarray as xr
 
-from radclss.util.column_utils import get_nexrad_column
+from radclss.util.column_utils import (
+    _accumulate_to_grid,
+    _column_time_step,
+    get_nexrad_column,
+)
 
 
 def test_get_nexrad_column():
@@ -157,3 +163,107 @@ def test_get_nexrad_column_integration():
     assert "height" in result.dims
     assert result.dims["station"] == len(input_site_dict)
     assert "reflectivity" in result.data_vars
+
+
+def _synthetic_gauge(n_minutes=120):
+    """A 1-minute gauge record with a rain burst, a dry spell and a data gap."""
+    time = pd.date_range("2025-06-19T00:01", periods=n_minutes, freq="1min")
+    accum = np.zeros(n_minutes)
+    accum[20:60] = np.linspace(0.05, 0.9, 40)  # burst
+    accum[70:80] = 0.2  # second, flatter burst
+    accum[90:100] = np.nan  # instrument gap
+    return xr.Dataset(
+        {"accum_nrt": ("time", accum, {"units": "mm", "long_name": "Accum"})},
+        coords={"time": time},
+    )
+
+
+@pytest.mark.parametrize("freq", ["1min", "5min", "15min"])
+def test_accumulate_to_grid_conserves_total_on_regular_grids(freq):
+    """
+    Re-binning an accumulation must move rain between time steps, never create
+    it. Summing into fixed bins and interpolating back onto a finer grid used to
+    inflate the daily total by the ratio of the two steps.
+    """
+    gauge = _synthetic_gauge()
+    column_time = xr.DataArray(
+        pd.date_range(gauge.time.values[0], gauge.time.values[-1], freq=freq),
+        dims="time",
+        name="time",
+    )
+
+    regridded = _accumulate_to_grid(gauge, column_time, "5Min")
+
+    assert np.isclose(
+        np.nansum(regridded["accum_nrt"].values),
+        np.nansum(gauge["accum_nrt"].values),
+    )
+
+
+def test_accumulate_to_grid_is_identity_at_native_resolution():
+    """On a grid matching the source, the values must come back untouched."""
+    gauge = _synthetic_gauge()
+
+    regridded = _accumulate_to_grid(gauge, gauge.time, "5Min")
+
+    np.testing.assert_allclose(
+        np.nan_to_num(regridded["accum_nrt"].values),
+        np.nan_to_num(gauge["accum_nrt"].values),
+        atol=1e-9,
+    )
+    assert regridded["accum_nrt"].attrs["units"] == "mm"
+
+
+def test_accumulate_to_grid_conserves_total_on_irregular_grid():
+    """Radar-based time coordinates are irregular; the integral must survive."""
+    gauge = _synthetic_gauge()
+    rng = np.random.default_rng(0)
+    picks = np.sort(rng.choice(np.arange(1, gauge.sizes["time"]), 40, replace=False))
+    column_time = gauge.time.isel(time=picks)
+
+    regridded = _accumulate_to_grid(gauge, column_time, "5Min")
+
+    assert np.isclose(
+        np.nansum(regridded["accum_nrt"].values),
+        np.nansum(gauge["accum_nrt"].values),
+    )
+
+
+def test_accumulate_to_grid_keeps_gaps_missing():
+    """A stretch with no valid samples must stay missing, not report zero rain."""
+    gauge = _synthetic_gauge()
+    column_time = xr.DataArray(
+        pd.date_range(gauge.time.values[0], gauge.time.values[-1], freq="5min"),
+        dims="time",
+        name="time",
+    )
+
+    regridded = _accumulate_to_grid(gauge, column_time, "5Min")
+
+    assert np.isnan(regridded["accum_nrt"].values).any()
+
+
+def test_column_time_step_falls_back_when_unmeasurable():
+    """Degenerate grids fall back to the supplied default rather than raising."""
+    single = xr.DataArray(pd.to_datetime(["2025-06-19T00:00"]), dims="time")
+    duplicated = xr.DataArray(pd.to_datetime(["2025-06-19T00:00"] * 4), dims="time")
+
+    assert _column_time_step(single, "5Min") == pd.Timedelta("5min")
+    assert _column_time_step(duplicated, "5Min") == pd.Timedelta("5min")
+
+
+def test_column_time_step_measures_regular_and_irregular_grids():
+    regular = xr.DataArray(
+        pd.date_range("2025-06-19", periods=10, freq="1min"), dims="time"
+    )
+    jittered = xr.DataArray(
+        pd.to_datetime(
+            ["2025-06-19T00:00", "2025-06-19T00:05", "2025-06-19T00:11"]
+            + ["2025-06-19T00:16", "2025-06-19T00:21", "2025-06-19T01:30"]
+        ),
+        dims="time",
+    )
+
+    assert _column_time_step(regular, "5Min") == pd.Timedelta("1min")
+    # Median, so the one long outlying gap does not set the step.
+    assert _column_time_step(jittered, "5Min") == pd.Timedelta("5min")
