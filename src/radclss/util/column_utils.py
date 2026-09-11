@@ -622,6 +622,74 @@ def subset_points(
     return ds
 
 
+#: Variables holding precipitation accumulated over one sampling interval.
+#: Only these are re-binned by integrating; every other variable on an
+#: accumulating instrument is an instantaneous rate (mm/hr) or a running bucket
+#: level, neither of which may be summed.
+ACCUMULATION_VARS = frozenset({"accum_nrt", "accum_rtnrt"})
+
+
+def _column_time_step(column_time, default):
+    """
+    Nominal spacing of a time coordinate, as a ``pd.Timedelta``.
+
+    The median difference is used because radar-based time coordinates are
+    irregular. Falls back to ``default`` for coordinates too short or too
+    degenerate to measure.
+    """
+    times = np.asarray(column_time.values).ravel()
+    if times.size < 2:
+        return pd.Timedelta(default)
+    deltas = np.diff(times).astype("timedelta64[ns]").astype(np.int64)
+    step = pd.Timedelta(int(np.median(deltas)), unit="ns")
+    if step <= pd.Timedelta(0):
+        return pd.Timedelta(default)
+    return step
+
+
+def _accumulate_to_grid(grd_ds, column_time, default_step):
+    """
+    Re-bin per-interval precipitation accumulations onto the column time grid.
+
+    Accumulation variables hold the precipitation that fell during one sampling
+    interval, stamped at the interval end. Summing them into fixed-width bins
+    and interpolating the bin totals back onto a finer column grid hands every
+    output step a whole bin's total, inflating the accumulation by the ratio of
+    the two steps. Integrating to a running total instead, interpolating that
+    onto the column grid and differencing it back, yields the accumulation over
+    each output interval and preserves the integral on regular and irregular
+    grids alike.
+    """
+    target = np.asarray(column_time.values).ravel()
+    step = _column_time_step(column_time, default_step)
+    edges = np.concatenate([[target[0] - step.to_timedelta64()], target])
+
+    # A zero anchor ahead of the record lets the first output interval
+    # difference against "nothing accumulated yet" rather than against a NaN.
+    source_step = _column_time_step(grd_ds["time"], default_step)
+    anchor = min(grd_ds["time"].values[0] - source_step.to_timedelta64(), edges[0])
+
+    def _anchored(ds):
+        head = (ds.isel(time=0) * 0).assign_coords(time=anchor).expand_dims("time")
+        return xr.concat([head, ds], dim="time").interp(time=edges, method="linear")
+
+    def _running(ds):
+        # cumsum drops the dimension coordinate, so put it back.
+        return ds.cumsum("time").assign_coords(time=grd_ds["time"])
+
+    running = _anchored(_running(grd_ds.fillna(0)))
+    counted = _anchored(_running(grd_ds.notnull().astype("float64")))
+
+    # Intervals covered by no valid source sample stay missing instead of
+    # reporting the zero that a gap in the running total would imply.
+    matched = running.diff("time").where(counted.diff("time") > 0)
+
+    for name in matched.data_vars:
+        matched[name].attrs.update(grd_ds[name].attrs)
+    matched.attrs.update(grd_ds.attrs)
+    return matched
+
+
 def _prepare_match(
     ground,
     site,
@@ -680,20 +748,32 @@ def _prepare_match(
     ]
     grd_ds = grd_ds.drop_vars(non_numeric_vars)
 
-    if resample == "mean":
-        matched = (
-            grd_ds.resample(time=resample_time, closed="right")
+    def _averaged(ds):
+        # closed="right" bins as (t, t + step]; pandas would otherwise label
+        # that bin t, a timestamp the bin excludes, shifting data one step early.
+        return (
+            ds.resample(time=resample_time, closed="right", label="right")
             .mean(keep_attrs=True)
             .interp(time=column_time, method="linear")
         )
+
+    if resample == "mean":
+        matched = _averaged(grd_ds)
     elif resample == "skip":
         matched = grd_ds.interp(time=column_time, method="linear")
     elif resample == "sum":
-        matched = (
-            grd_ds.resample(time=resample_time, closed="right")
-            .sum(keep_attrs=True)
-            .interp(time=column_time, method="linear")
-        )
+        # Only true accumulations may be integrated. The remaining variables on
+        # a gauge are rain intensities and the running bucket level, which are
+        # averaged like any other instantaneous measurement.
+        accum = [v for v in grd_ds.data_vars if v in ACCUMULATION_VARS]
+        instant = [v for v in grd_ds.data_vars if v not in ACCUMULATION_VARS]
+        parts = []
+        if accum:
+            parts.append(_accumulate_to_grid(grd_ds[accum], column_time, resample_time))
+        if instant:
+            parts.append(_averaged(grd_ds[instant]))
+        matched = xr.merge(parts, combine_attrs="override")
+        matched.attrs.update(grd_ds.attrs)
     else:
         raise ValueError(
             "Invalid resample method. Please choose 'mean', 'sum', or 'skip'."
@@ -708,8 +788,10 @@ def _prepare_match(
 
     for var in matched.data_vars:
         matched[var].attrs.update(source=matched.datastream)
-    grd_ds.close()
-    _grd_raw.close()
+    # Only close what this function opened; a caller-supplied dataset is theirs.
+    if not DataSet:
+        grd_ds.close()
+        _grd_raw.close()
     return site, matched
 
 
