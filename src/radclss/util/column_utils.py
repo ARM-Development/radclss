@@ -574,21 +574,28 @@ def subset_points(
                 valid = np.isfinite(da["height"])
                 n_valid = int(valid.sum())
                 interpolated = False
-                dvars = da.data_vars
+                # time_offset is bookkeeping, not a measurement: gate_time
+                # below is computed from it. A column outside the radar's
+                # coverage has no gate times at all, so purging it along with
+                # the all-NaN fields would leave nothing for gate_time to read,
+                # and letting it drive dropna would discard every height.
+                dvars = [v for v in da.data_vars if v != "time_offset"]
                 for v in dvars:
                     if np.all(np.isnan(da[v].values)):
-                        da = da.drop(v)
+                        da = da.drop_vars(v)
+                measured = [v for v in da.data_vars if v != "time_offset"]
                 if n_valid > 0:
-                    da_clean = da.dropna("height").sortby("height")
+                    da_clean = da.dropna("height", subset=measured).sortby("height")
                     if da_clean.sizes.get("height", 0) > 0:
                         try:
                             da = da_clean.interp(height=height_bins)
                         except pd.errors.InvalidIndexError:
                             da_clean = da_clean.drop_duplicates("height", keep="first")
                             da = da_clean.interp(height=height_bins)
-                            time_offset = time_offset.drop_duplicates(
-                                "height", keep="first"
-                            )
+                            if "rhi" in radar.scan_type:
+                                time_offset = time_offset.drop_duplicates(
+                                    "height", keep="first"
+                                )
                         interpolated = True
 
                 if not interpolated:

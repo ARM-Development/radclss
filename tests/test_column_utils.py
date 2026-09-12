@@ -9,6 +9,7 @@ from radclss.util.column_utils import (
     _accumulate_to_grid,
     _column_time_step,
     get_nexrad_column,
+    subset_points,
 )
 
 
@@ -267,3 +268,107 @@ def test_column_time_step_measures_regular_and_irregular_grids():
     assert _column_time_step(regular, "5Min") == pd.Timedelta("1min")
     # Median, so the one long outlying gap does not set the step.
     assert _column_time_step(jittered, "5Min") == pd.Timedelta("5min")
+
+
+def _out_of_coverage_column(heights):
+    """
+    What Py-ART hands back for a site the radar never sampled.
+
+    ``column_vertical_profile`` averages an empty set of rays into NaN for
+    every field, and ``time_offset`` -- the mean gate time -- comes back NaN
+    right along with them.
+    """
+    n = len(heights)
+    return xr.Dataset(
+        {
+            "reflectivity": (["height"], np.full(n, np.nan)),
+            "time_offset": (["height"], np.full(n, np.nan)),
+            "base_time": np.datetime64("2025-06-19T00:00:00"),
+        },
+        coords={"height": (["height"], heights)},
+    ).set_coords(["base_time"])
+
+
+def test_subset_points_survives_a_column_outside_radar_coverage():
+    """
+    A site the radar never sampled yields an all-NaN column, ``time_offset``
+    included. Purging every all-NaN variable used to take ``time_offset`` with
+    it and leave the gate_time calculation reading a variable that no longer
+    existed, raising ``KeyError: 'time_offset'`` and losing the whole scan --
+    every co-located site with it, not just the one out of coverage.
+    """
+    input_site_dict = {"M1": (34.34525, -87.33842, 293)}
+    height_bins = np.arange(500, 8500, 250)
+
+    mock_radar = MagicMock()
+    mock_radar.scan_type = "ppi"
+    mock_radar.metadata = {"scan_mode": "ppi", "facility_id": "M1"}
+    mock_radar.time = {"data": np.arange(10.0)}
+    mock_radar.sweep_start_ray_index = {"data": np.ma.array([0])}
+    mock_radar.sweep_end_ray_index = {"data": np.ma.array([9])}
+
+    column = _out_of_coverage_column(np.arange(500.0, 8500.0, 100.0))
+
+    with (
+        patch("radclss.util.column_utils.pyart.io.read", return_value=mock_radar),
+        patch(
+            "radclss.util.column_utils.pyart.util.columnsect.column_vertical_profile",
+            return_value=column,
+        ),
+    ):
+        result = subset_points(
+            "bnfcsapr2cfrS3.a1.20250619.000000.nc",
+            input_site_dict,
+            height_bins=height_bins,
+        )
+
+    assert result is not None
+    assert "time_offset" in result
+    assert result.sizes["station"] == 1
+    np.testing.assert_array_equal(result["height"].values, height_bins)
+    # No gate times to report, but the column still comes back and says so.
+    assert np.all(np.isnat(result["time_offset"].values))
+    assert np.all(np.isnat(result["gate_time"].values))
+
+
+def test_subset_points_keeps_heights_a_partly_missing_field_would_drop():
+    """
+    ``time_offset`` must not decide which heights survive ``dropna``. Gates the
+    radar did sample stay in the column even where the gate time is missing.
+    """
+    input_site_dict = {"M1": (34.34525, -87.33842, 293)}
+    height_bins = np.arange(500, 2500, 250)
+    heights = np.arange(500.0, 2500.0, 100.0)
+
+    offsets = np.zeros(len(heights))
+    offsets[::2] = np.nan  # gate times missing on half the gates
+    column = xr.Dataset(
+        {
+            "reflectivity": (["height"], np.linspace(10.0, 40.0, len(heights))),
+            "time_offset": (["height"], offsets),
+            "base_time": np.datetime64("2025-06-19T00:00:00"),
+        },
+        coords={"height": (["height"], heights)},
+    ).set_coords(["base_time"])
+
+    mock_radar = MagicMock()
+    mock_radar.scan_type = "ppi"
+    mock_radar.metadata = {"scan_mode": "ppi", "facility_id": "M1"}
+    mock_radar.time = {"data": np.arange(10.0)}
+    mock_radar.sweep_start_ray_index = {"data": np.ma.array([0])}
+    mock_radar.sweep_end_ray_index = {"data": np.ma.array([9])}
+
+    with (
+        patch("radclss.util.column_utils.pyart.io.read", return_value=mock_radar),
+        patch(
+            "radclss.util.column_utils.pyart.util.columnsect.column_vertical_profile",
+            return_value=column,
+        ),
+    ):
+        result = subset_points(
+            "bnfcsapr2cfrS3.a1.20250619.000000.nc",
+            input_site_dict,
+            height_bins=height_bins,
+        )
+
+    assert np.isfinite(result["reflectivity"].values).all()
