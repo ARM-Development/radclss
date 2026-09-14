@@ -1,9 +1,10 @@
 name: Deploy Documentation
 
 on:
-  push:
-    branches:
-      - main
+  # Automatic runs are disabled: the repository group settings do not grant
+  # access to GitHub Pages, so configure-pages fails with "Get Pages site
+  # failed" on every push to main. Re-enable by restoring the push trigger
+  # below once Pages is available for this repository.
   workflow_dispatch:  # Allow manual triggering
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
