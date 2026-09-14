@@ -7,6 +7,7 @@ import xarray as xr
 
 from radclss.util.column_utils import (
     _accumulate_to_grid,
+    _apply_match,
     _column_time_step,
     get_nexrad_column,
     subset_points,
@@ -242,6 +243,41 @@ def test_accumulate_to_grid_keeps_gaps_missing():
     regridded = _accumulate_to_grid(gauge, column_time, "5Min")
 
     assert np.isnan(regridded["accum_nrt"].values).any()
+
+
+def test_accumulate_to_grid_keeps_the_column_datetime_unit():
+    """
+    A real column time coordinate is built from base_time and so carries
+    second resolution, not the nanoseconds pd.date_range hands the tests
+    above. Subtracting a pandas Timedelta promoted the interpolation edges to
+    nanoseconds, and interp passed that unit on to the result. _apply_match
+    could then no longer write the result back into the column: xarray
+    compares coordinates by dtype as well as by value, so the two disagreed
+    despite holding identical timestamps.
+    """
+    gauge = _synthetic_gauge()
+    seconds = gauge.time.values.astype("datetime64[s]")[::5]
+    column_time = xr.DataArray(seconds, dims="time", coords={"time": seconds})
+
+    regridded = _accumulate_to_grid(gauge, column_time, "5Min")
+
+    assert regridded["time"].dtype == column_time.dtype
+
+    # The write _apply_match performs in the pipeline, which is where the
+    # mismatched unit actually surfaced.
+    matched = regridded.assign_coords(station="M1").expand_dims("station")
+    column = xr.Dataset(
+        {"accum_nrt": (("station", "time"), np.zeros((1, seconds.size)))},
+        coords={"station": ["M1"], "time": seconds},
+    )
+
+    _apply_match(column, "M1", matched)
+
+    np.testing.assert_allclose(
+        column["accum_nrt"].values[0],
+        regridded["accum_nrt"].values,
+        atol=1e-9,
+    )
 
 
 def test_column_time_step_falls_back_when_unmeasurable():
