@@ -7,7 +7,7 @@ name = "radclss"
 version = "2026.9.12"
 description = "Extracted Radar Columns and In Situ Sensors"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "rjackson" }, {name = "jrobrien91"}]
 license = { text = "MIT" }
 dependencies = [
