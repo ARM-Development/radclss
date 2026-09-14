@@ -669,7 +669,15 @@ def _accumulate_to_grid(grd_ds, column_time, default_step):
     """
     target = np.asarray(column_time.values).ravel()
     step = _column_time_step(column_time, default_step)
-    edges = np.concatenate([[target[0] - step.to_timedelta64()], target])
+    # pd.Timedelta.to_timedelta64 carries sub-second precision, so subtracting
+    # it promotes the leading edge -- and with it the whole array -- off the
+    # column's own datetime unit. interp hands that unit to the result, and
+    # _apply_match then assigns the result into a column whose time coordinate
+    # is still datetime64[s]; xarray compares the two coordinates by dtype as
+    # well as by value and rejects the write. Stay on the column's unit.
+    edges = np.concatenate([[target[0] - step.to_timedelta64()], target]).astype(
+        target.dtype
+    )
 
     # A zero anchor ahead of the record lets the first output interval
     # difference against "nothing accumulated yet" rather than against a NaN.
