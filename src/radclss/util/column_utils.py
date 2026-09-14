@@ -312,7 +312,7 @@ def get_nexrad_column(
     site_alt = [x[2] for x in input_site_dict.values()]
     sites = list(input_site_dict.keys())
     right_now = datetime.datetime.strptime(rad_time, "%Y-%m-%dT%H:%M:%S").replace(
-        tzinfo=datetime.timezone.utc
+        tzinfo=datetime.UTC
     )
     yesterday = right_now - timedelta(days=1)
     year = right_now.year
@@ -341,7 +341,7 @@ def get_nexrad_column(
             time_list.append(
                 datetime.datetime.strptime(
                     name, f"{nexrad_radar}%Y%m%d_%H%M%S_V06"
-                ).replace(tzinfo=datetime.timezone.utc)
+                ).replace(tzinfo=datetime.UTC)
             )
 
     time_list = np.array(time_list)
@@ -482,14 +482,14 @@ def subset_points(
                     + "."
                     + nfile.split("/")[-1].split(".")[-2],
                     "%Y%m%d.%H%M%S",
-                ).replace(tzinfo=datetime.timezone.utc)
+                ).replace(tzinfo=datetime.UTC)
                 sonde_start = [
                     datetime.datetime.strptime(
                         xfile.split("/")[-1].split(".")[2]
                         + "-"
                         + xfile.split("/")[-1].split(".")[3],
                         "%Y%m%d-%H%M%S",
-                    ).replace(tzinfo=datetime.timezone.utc)
+                    ).replace(tzinfo=datetime.UTC)
                     for xfile in sonde
                 ]
                 # difference in time between radar file and each sonde file

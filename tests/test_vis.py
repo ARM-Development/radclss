@@ -264,7 +264,7 @@ def test_create_radclss_columns_wraparound_keeps_all_times():
     assert span > datetime.timedelta(hours=23)
     assert (
         mdates.num2date(x_min)
-        < datetime.datetime(2026, 7, 14, 12, tzinfo=datetime.timezone.utc)
+        < datetime.datetime(2026, 7, 14, 12, tzinfo=datetime.UTC)
         < mdates.num2date(x_max)
     )
     plt.close(fig)
@@ -282,11 +282,9 @@ def test_create_radclss_timeseries_wraparound_panels_aligned():
 
     x_min, x_max = limits[0]
     assert mdates.num2date(x_min) == datetime.datetime(
-        2026, 7, 13, 23, 58, tzinfo=datetime.timezone.utc
+        2026, 7, 13, 23, 58, tzinfo=datetime.UTC
     )
-    assert mdates.num2date(x_max) == datetime.datetime(
-        2026, 7, 15, tzinfo=datetime.timezone.utc
-    )
+    assert mdates.num2date(x_max) == datetime.datetime(2026, 7, 15, tzinfo=datetime.UTC)
 
     # the suptitle reports the product day, not the day of time[0]
     assert fig._suptitle.get_text().endswith("2026-07-14")
