@@ -230,6 +230,8 @@ def radclss(
                         f"  Finished {k}: {successful}/{len(columns[k])} successful extractions"
                     )
 
+    columns = _prune_empty_columns(columns, time_coords, verbose=verbose)
+
     # Assemble individual columns into single DataSet
     # try:
     # Concatenate all extracted columns across time dimension to form daily timeseries
@@ -374,13 +376,32 @@ def radclss(
                         )
                     logger.exception("Error fetching NEXRAD data")
 
+        valid_nexrad = [
+            data
+            for data in nexrad_columns
+            if data is not None and len(data.variables) > 0
+        ]
         if verbose:
-            valid_nexrad = sum(1 for x in nexrad_columns if x is not None)
-            print(f"  Concatenating {valid_nexrad} valid NEXRAD columns...")
+            print(f"  Concatenating {len(valid_nexrad)} valid NEXRAD columns...")
 
-        nexrad_columns = xr.concat(
-            [data for data in nexrad_columns if data], dim="time"
-        )
+        if len(valid_nexrad) == 0:
+            # Same reasoning as the radar keys above: no NEXRAD data means no
+            # NEXRAD entry, not a failed run.
+            if time_coords.lower() == "nexrad":
+                raise RuntimeError(
+                    "No NEXRAD columns were retrieved, but NEXRAD was requested as the "
+                    + "time basis. Please choose a radar that has data or an interval "
+                    + "instead."
+                )
+            logger.warning(
+                "No NEXRAD columns were retrieved. NEXRAD will be excluded from the output."
+            )
+            if verbose:
+                print("  No valid NEXRAD columns - excluding NEXRAD from the output")
+            nexrad = False
+            nexrad_columns = None
+        else:
+            nexrad_columns = xr.concat(valid_nexrad, dim="time")
     else:
         nexrad_columns = None
 
@@ -896,6 +917,58 @@ def radclss(
         print("=" * 80)
 
     return ds
+
+
+def _prune_empty_columns(columns, time_coords, verbose=False):
+    """
+    Drop the failed extractions, then drop any radar that has nothing left.
+
+    A radar handed an empty file list, or whose files all failed to open, has no
+    columns to concatenate. Carrying the key any further raises on the empty
+    list further downstream, so the radar is dropped here and treated as an
+    instrument that simply was not there.
+
+    Parameters
+    ----------
+    columns : dict
+        Dictionary keyed by radar, where each value is the list of extracted
+        columns for that radar. Entries that failed to extract are None.
+    time_coords : str
+        The time basis requested by the caller.
+    verbose : bool, optional
+        Option to print additional information during processing. Default is False.
+
+    Returns
+    -------
+    columns : dict
+        The input dictionary with the empty entries removed.
+
+    Raises
+    ------
+    RuntimeError
+        If no radar has any columns, or if the radar requested as the time
+        basis has none.
+    """
+    for k in list(columns.keys()):
+        columns[k] = [x for x in columns[k] if x is not None]
+        if len(columns[k]) == 0:
+            logger.warning(
+                f"No columns were extracted for {k}. It will be excluded from the output."
+            )
+            if verbose:
+                print(f"\n  No valid columns for {k} - excluding from the output")
+            del columns[k]
+
+    if len(columns) == 0:
+        raise RuntimeError(": RadCLss FAILURE (All Columns Failed to Extract): ")
+
+    if "radar" in time_coords and time_coords not in columns:
+        raise RuntimeError(
+            f"No columns were extracted for {time_coords}, which was requested as the "
+            + "time basis. Please choose a radar that has data or an interval instead."
+        )
+
+    return columns
 
 
 def _is_valid_offset(s: str) -> bool:
