@@ -26,6 +26,7 @@ def radclss(
     time_coords,
     serial=True,
     dod_version="1.0",
+    dod_file=None,
     discard_var=None,
     verbose=False,
     base_station="M1",
@@ -72,6 +73,11 @@ def radclss(
     dod_version : str, optional
         Option to supply a Data Object Description version to verify standards.
         If this is an empty string, then the latest version will be used. Default is '1.0'.
+    dod_file : str or pathlib.Path, optional
+        Path to a local copy of the PCM DOD JSON (i.e. the body of
+        https://pcm.arm.gov/pcm/api/dods/<platform>.<level>). When set, the DOD is
+        read from disk instead of fetched over HTTPS, so processing does not
+        require outbound network access. Default is None, which queries PCM.
     discard_var : dict, optional
         Dictionary containing variables to drop from each datastream. Default is None,
         which uses the default discard variables for each instrument.
@@ -589,18 +595,30 @@ def radclss(
         print("=" * 80)
         print(f"  Platform/Level: {output_platform}.{output_level}")
         print(f"  DOD version: {dod_version}")
+        print(
+            f"  DOD source: {dod_file if dod_file is not None else 'PCM (https://pcm.arm.gov)'}"
+        )
         print("Variables in merged dataset:")
         for vars in ds_concat.data_vars:
             print(vars)
 
+    # ACT pulls the DOD from PCM over HTTPS unless a local copy is given. Reading
+    # from disk keeps processing off the network, which matters for VAPs running
+    # where outbound HTTPS is unavailable or the CA bundle is not current.
+    if dod_file is not None:
+        dod_source, local_file = str(dod_file), True
+    else:
+        dod_source, local_file = f"{output_platform}.{output_level}", False
+
     ds = act.io.create_ds_from_arm_dod(
-        f"{output_platform}.{output_level}",
+        dod_source,
         {
             "time": ds_concat.sizes["time"],
             "height": ds_concat.sizes["height"],
             "station": ds_concat.sizes["station"],
         },
         version=dod_version,
+        local_file=local_file,
     )
 
     if verbose:
