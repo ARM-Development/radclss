@@ -4,10 +4,12 @@ import os
 import act
 import arm_test_data
 import numpy as np
+import pytest
 import xarray as xr
 from distributed import Client, LocalCluster
 
 import radclss
+from radclss.core.radclss_core import _prune_empty_columns
 
 
 def test_radclss_serial():
@@ -998,3 +1000,31 @@ def test_match_datasets_act():
     assert matched_ds_mean.dims["time"] == radclss_ds.dims["time"]
     assert matched_ds_skip.dims["time"] == radclss_ds.dims["time"]
     assert matched_ds_sum.dims["time"] == radclss_ds.dims["time"]
+
+
+def test_prune_empty_columns_drops_empty_radars():
+    columns = {
+        "radar_csapr2": [xr.Dataset({"reflectivity": ("time", [1.0])}), None],
+        "radar_xsacr": [None, None],
+        "radar_kasacr": [],
+    }
+
+    pruned = _prune_empty_columns(columns, "radar_csapr2")
+
+    assert list(pruned.keys()) == ["radar_csapr2"]
+    assert len(pruned["radar_csapr2"]) == 1
+
+
+def test_prune_empty_columns_all_empty():
+    with pytest.raises(RuntimeError, match="All Columns Failed to Extract"):
+        _prune_empty_columns({"radar_csapr2": [None]}, "radar_csapr2")
+
+
+def test_prune_empty_columns_empty_time_basis():
+    columns = {
+        "radar_csapr2": [xr.Dataset({"reflectivity": ("time", [1.0])})],
+        "radar_xsacr": [None],
+    }
+
+    with pytest.raises(RuntimeError, match="requested as the time basis"):
+        _prune_empty_columns(columns, "radar_xsacr")
