@@ -74,6 +74,12 @@ def _update_source_attributes(ds, volumes):
                 break
 
 
+def _remove_input_datastream_attributes(ds):
+    """Remove intermediate input-datastream metadata from output variables."""
+    for variable in ds.data_vars.values():
+        variable.attrs.pop("input_datastream", None)
+
+
 def radclss(
     volumes,
     input_site_dict,
@@ -952,6 +958,7 @@ def radclss(
     # The DOD has already constrained ``ds`` to approved output variables.
     # Attach provenance only now, once all variables have been populated.
     _update_source_attributes(ds, volumes)
+    _remove_input_datastream_attributes(ds)
 
     if verbose:
         print(" Adding input datastream names to dataset attributes...")
