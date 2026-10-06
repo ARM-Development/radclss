@@ -9,7 +9,36 @@ import xarray as xr
 from distributed import Client, LocalCluster
 
 import radclss
-from radclss.core.radclss_core import _prune_empty_columns
+from radclss.core.radclss_core import (
+    _prune_empty_columns,
+    _remove_input_datastream_attributes,
+    _update_source_attributes,
+)
+
+
+def test_update_source_attributes_from_input_datastreams():
+    ds = xr.Dataset(
+        {
+            "csapr2_reflectivity": ("time", [1.0]),
+            "sonde_u_wind": ("time", [2.0]),
+            "unmatched_variable": ("time", [3.0]),
+        },
+        coords={"time": [0]},
+    )
+    ds["sonde_u_wind"].attrs["source"] = "existing-source"
+    ds["sonde_u_wind"].attrs["input_datastream"] = "temporary-source"
+    volumes = {
+        "radar_csapr2": ["/data/bnfcsapr2cfrS3.a1.20250619.120000.nc"],
+        "sonde": ["/data/bnfinterpolatedsondeM1.c1.20250619.000000.nc"],
+    }
+
+    _update_source_attributes(ds, volumes)
+    _remove_input_datastream_attributes(ds)
+
+    assert ds["csapr2_reflectivity"].attrs["source"] == "bnfcsapr2cfr.a1"
+    assert ds["sonde_u_wind"].attrs["source"] == "bnfinterpolatedsonde.c1"
+    assert "input_datastream" not in ds["sonde_u_wind"].attrs
+    assert "source" not in ds["unmatched_variable"].attrs
 
 
 def test_radclss_serial():
