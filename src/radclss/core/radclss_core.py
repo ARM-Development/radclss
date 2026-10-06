@@ -1,6 +1,8 @@
 import logging
+import re
 import time
 import traceback
+from pathlib import Path
 
 import act
 import numpy as np
@@ -18,6 +20,58 @@ from ..util.column_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_DATASTREAM_RE = re.compile(r"^([^.]+\.[a-z]\d)(?:\.|$)", re.IGNORECASE)
+_SITE_SUFFIX_RE = re.compile(r"[A-Z]\d+(?=\.[a-z]\d$)", re.IGNORECASE)
+
+
+def _datastream_from_path(path):
+    """Return the ARM datastream identifier encoded in an input filename."""
+    match = _DATASTREAM_RE.match(Path(str(path)).name)
+    if not match:
+        return None
+    return _SITE_SUFFIX_RE.sub("", match.group(1))
+
+
+def _source_prefix(volume_key):
+    """Return the output-variable prefix associated with a volumes key."""
+    instrument = volume_key.split("_", 1)[0]
+    if instrument == "radar":
+        return volume_key.split("_", 1)[1] + "_"
+    return {
+        "ld": "ldquants_",
+        "vd": "vdisquants_",
+        "wxt": "wxt_",
+        "sonde": "sonde_",
+        "kazr": "kazr_",
+        "kazr2": "kazr2_",
+    }.get(instrument)
+
+
+def _update_source_attributes(ds, volumes):
+    """Add input datastream IDs to DOD-approved output variables.
+
+    This is intentionally called after the dataset has been created from the
+    DOD and populated.  Thus provenance is added only to variables that are
+    present in the DOD-defined output dataset, replacing stale values on
+    variables whose input datastream can be identified.
+    """
+    datastreams = {}
+    for key, paths in volumes.items():
+        if key == "date" or not paths:
+            continue
+        path = paths[0] if isinstance(paths, (list, tuple)) else paths
+        datastream = _datastream_from_path(path)
+        if datastream:
+            datastreams[key] = datastream
+
+    for name, variable in ds.data_vars.items():
+        for key, datastream in datastreams.items():
+            prefix = _source_prefix(key)
+            if prefix and name.startswith(prefix):
+                variable.attrs["source"] = datastream
+                break
 
 
 def radclss(
@@ -894,6 +948,10 @@ def radclss(
     del ds["base_time"].attrs["units"]
     del ds["time_offset"].attrs["units"]
     del ds["time"].attrs["units"]
+
+    # The DOD has already constrained ``ds`` to approved output variables.
+    # Attach provenance only now, once all variables have been populated.
+    _update_source_attributes(ds, volumes)
 
     if verbose:
         print(" Adding input datastream names to dataset attributes...")
