@@ -1,7 +1,7 @@
 sphinx>=7.0
 sphinx-rtd-theme>=2.0
 arm_pyart
-pip
+pip>=26.2.2
 act-atmos
 xradar
 matplotlib
