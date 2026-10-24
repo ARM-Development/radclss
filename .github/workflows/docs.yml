@@ -1,14 +1,23 @@
-name: Documentation
+name: Deploy Documentation
 
 on:
-  # Automatic runs are disabled. This build needs no GitHub Pages access, but
-  # it fails its sphinx-build -W check on 16 pre-existing warnings, and it is
-  # turned off alongside Deploy Documentation until docs CI is revisited.
-  # Re-enable by restoring the pull_request and schedule triggers below.
-  workflow_dispatch:  # Allow manual triggering
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  build-docs:
+  # This job installs dependencies, builds the documentation, and uploads it as an artifact
+  build-site:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,7 +28,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.13'
+          python-version: '3.14.9'
           cache: 'pip'
 
       - name: Install dependencies
@@ -33,16 +42,38 @@ jobs:
           cd docs
           make html
 
-      - name: Upload documentation artifact
+      - name: Upload site artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: documentation
-          path: docs/_build/html/
-          retention-days: 7
+          name: site-html
+          path: docs/_build/html
 
-      - name: Check for warnings
-        run: |
-          cd docs
-          # Rebuild with warnings as errors to catch issues
-          make clean
-          sphinx-build -W -b html . _build/html
+  # This job downloads the built site and deploys it to GitHub Pages
+  deploy-site:
+    needs: build-site
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download site artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site-html
+          path: docs/_build/html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/_build/html
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
