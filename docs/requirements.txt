@@ -10,3 +10,4 @@ distributed
 xarray==2025.6.1
 sphinx
 sphinx-rtd-theme
+boto3
