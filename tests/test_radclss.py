@@ -41,6 +41,46 @@ def test_update_source_attributes_from_input_datastreams():
     assert "source" not in ds["unmatched_variable"].attrs
 
 
+def test_update_source_attributes_for_met_and_pluvio_dod_variables():
+    met_variables = [
+        "atmos_pressure",
+        "temp_mean",
+        "rh_mean",
+        "vapor_pressure_mean",
+        "wspd_arith_mean",
+        "wspd_vec_mean",
+        "wdir_vec_mean",
+        "tbrg_precip_total_corr",
+    ]
+    pluvio_variables = [
+        "intensity_rt",
+        "accum_rtnrt",
+        "accum_nrt",
+        "bucket_nrt",
+        "intensity_rtnrt",
+    ]
+    ds = xr.Dataset(
+        {
+            **{name: ("time", [1.0]) for name in met_variables},
+            **{name: ("time", [2.0]) for name in pluvio_variables},
+            "unmatched_variable": ("time", [3.0]),
+        },
+        coords={"time": [0]},
+    )
+    volumes = {
+        "met_M1": ["/data/bnfmetM1.b1.20250619.120000.nc"],
+        "pluvio_M1": ["/data/bnfwbpluvio2M1.a1.20250619.120000.nc"],
+    }
+
+    _update_source_attributes(ds, volumes)
+
+    for name in met_variables:
+        assert ds[name].attrs["source"] == "bnfmet.b1"
+    for name in pluvio_variables:
+        assert ds[name].attrs["source"] == "bnfwbpluvio2.a1"
+    assert "source" not in ds["unmatched_variable"].attrs
+
+
 def test_radclss_serial():
     test_data_path = arm_test_data.DATASETS.abspath
 
