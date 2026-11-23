@@ -24,6 +24,25 @@ logger = logging.getLogger(__name__)
 
 _DATASTREAM_RE = re.compile(r"^([^.]+\.[a-z]\d)(?:\.|$)", re.IGNORECASE)
 _SITE_SUFFIX_RE = re.compile(r"[A-Z]\d+(?=\.[a-z]\d$)", re.IGNORECASE)
+_SOURCE_VARIABLE_NAMES = {
+    "met": {
+        "atmos_pressure",
+        "temp_mean",
+        "rh_mean",
+        "vapor_pressure_mean",
+        "wspd_arith_mean",
+        "wspd_vec_mean",
+        "wdir_vec_mean",
+        "tbrg_precip_total_corr",
+    },
+    "pluvio": {
+        "intensity_rt",
+        "accum_rtnrt",
+        "accum_nrt",
+        "bucket_nrt",
+        "intensity_rtnrt",
+    },
+}
 
 
 def _datastream_from_path(path):
@@ -69,7 +88,10 @@ def _update_source_attributes(ds, volumes):
     for name, variable in ds.data_vars.items():
         for key, datastream in datastreams.items():
             prefix = _source_prefix(key)
-            if prefix and name.startswith(prefix):
+            instrument = key.split("_", 1)[0]
+            if (
+                prefix and name.startswith(prefix)
+            ) or name in _SOURCE_VARIABLE_NAMES.get(instrument, set()):
                 variable.attrs["source"] = datastream
                 break
 
